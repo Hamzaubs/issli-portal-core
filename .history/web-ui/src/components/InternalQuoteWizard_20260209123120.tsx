@@ -1,0 +1,267 @@
+import React, { useState, useEffect } from 'react';
+import { 
+    X, Search, Plus, Trash2, User, ShoppingCart, 
+    FileText, ArrowRight, ChevronRight, Package, Calculator 
+} from 'lucide-react';
+import client from '../api/client';
+
+interface Props {
+    onCancel: () => void;
+    onSuccess: () => void;
+}
+
+// 🛡️ SAFE MATH UTILS
+const safeFloat = (val: any) => {
+    const num = parseFloat(val);
+    return isNaN(num) ? 0 : num;
+};
+
+const formatMoney = (val: number) => 
+    val.toLocaleString('fr-MA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+export const InternalQuoteWizard: React.FC<Props> = ({ onCancel, onSuccess }) => {
+    const [step, setStep] = useState(1);
+    const [loading, setLoading] = useState(false);
+    
+    // Data Sources
+    const [clients, setClients] = useState<any[]>([]);
+    const [products, setProducts] = useState<any[]>([]);
+    const [searchTerm, setSearchTerm] = useState('');
+
+    // Selection
+    const [selectedClient, setSelectedClient] = useState<any>(null);
+    const [cart, setCart] = useState<any[]>([]);
+
+    // Load Data on Mount
+    useEffect(() => {
+        const loadData = async () => {
+            try {
+                // Fetch Internal Clients & Products
+                const [c, p] = await Promise.all([
+                    client.get('/dashboard/clients?mode=INTERNAL'), // Reusing your existing endpoint
+                    client.get('/internal/products')
+                ]);
+                setClients(c.data);
+                setProducts(p.data);
+            } catch (err) {
+                console.error("Erreur chargement données wizard", err);
+            }
+        };
+        loadData();
+    }, []);
+
+    // --- CART LOGIC ---
+    const addToCart = (product: any) => {
+        const existing = cart.find(item => item.id === product.id);
+        if (existing) {
+            setCart(cart.map(item => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item));
+        } else {
+            setCart([...cart, { ...product, quantity: 1, unitPrice: safeFloat(product.sellingPrice) }]);
+        }
+    };
+
+    const updateQuantity = (id: string, delta: number) => {
+        setCart(cart.map(item => {
+            if (item.id === id) return { ...item, quantity: Math.max(1, item.quantity + delta) };
+            return item;
+        }));
+    };
+
+    const removeFromCart = (id: string) => setCart(cart.filter(item => item.id !== id));
+
+    const totalAmount = cart.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
+
+    // --- SUBMISSION (ATOMIC BATCH) ---
+    const handleSubmit = async () => {
+        if (!selectedClient) return alert("Veuillez sélectionner un client.");
+        if (cart.length === 0) return alert("Le panier est vide.");
+
+        setLoading(true);
+        try {
+            // ✅ Calls the Atomic Batch Endpoint we built earlier
+            await client.post('/internal/transactions/batch', {
+                type: 'QUOTE',
+                clientId: selectedClient.id,
+                items: cart.map(item => ({
+                    productId: item.id,
+                    quantity: item.quantity,
+                    unitPrice: item.unitPrice
+                }))
+            });
+            alert("✅ Devis enregistré avec succès !");
+            onSuccess();
+        } catch (error: any) {
+            alert("Erreur: " + (error.response?.data?.error || "Erreur inconnue"));
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Filter Lists
+    const filteredClients = clients.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()));
+    const filteredProducts = products.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase()));
+
+    return (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in zoom-in-95">
+            <div className="bg-slate-50 w-full max-w-6xl h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-white/10">
+                
+                {/* HEADER (Amber Theme for Devis) */}
+                <div className="px-6 py-4 bg-white border-b border-amber-100 flex justify-between items-center shadow-sm shrink-0">
+                    <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center shadow-inner">
+                            <FileText size={24} strokeWidth={2.5}/>
+                        </div>
+                        <div>
+                            <h2 className="text-xl font-black text-slate-800 leading-tight flex items-center gap-2">
+                                NOUVEAU DEVIS
+                                <span className="text-[10px] px-2 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200 uppercase tracking-wide">Stock B</span>
+                            </h2>
+                            <div className="flex items-center gap-2 text-xs font-medium text-slate-400 mt-1">
+                                <span className={step === 1 ? `text-amber-600 font-bold` : ''}>1. Client</span>
+                                <ArrowRight size={10}/>
+                                <span className={step === 2 ? `text-amber-600 font-bold` : ''}>2. Articles</span>
+                            </div>
+                        </div>
+                    </div>
+                    <button onClick={onCancel} className="p-2 hover:bg-slate-100 text-slate-400 hover:text-slate-600 rounded-full transition-colors">
+                        <X size={24}/>
+                    </button>
+                </div>
+
+                {/* STEP 1: CLIENT SELECTION */}
+                {step === 1 && (
+                    <div className="flex-1 overflow-hidden flex flex-col p-8 bg-slate-50">
+                        <div className="max-w-2xl mx-auto w-full flex flex-col h-full">
+                            <h3 className="text-2xl font-bold text-slate-800 mb-6 text-center">Qui est le client ?</h3>
+                            
+                            <div className="relative mb-4 shrink-0">
+                                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20}/>
+                                <input 
+                                    autoFocus 
+                                    type="text" 
+                                    placeholder="Rechercher (Nom, Téléphone)..." 
+                                    className="w-full pl-12 p-4 bg-white border-2 border-slate-200 rounded-2xl shadow-sm outline-none focus:border-amber-400 focus:ring-4 focus:ring-amber-500/10 transition-all font-bold text-lg"
+                                    value={searchTerm} 
+                                    onChange={e => setSearchTerm(e.target.value)} 
+                                />
+                            </div>
+
+                            <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+                                {filteredClients.map(c => (
+                                    <button 
+                                        key={c.id} 
+                                        onClick={() => { setSelectedClient(c); setSearchTerm(''); setStep(2); }} 
+                                        className="w-full flex items-center gap-4 p-4 bg-white border border-slate-200 rounded-xl hover:border-amber-400 hover:bg-amber-50 hover:shadow-md transition-all text-left group"
+                                    >
+                                        <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center font-bold text-slate-500 group-hover:bg-amber-200 group-hover:text-amber-800">
+                                            <User size={20}/>
+                                        </div>
+                                        <div className="flex-1">
+                                            <div className="font-bold text-slate-800 text-lg">{c.name}</div>
+                                            <div className="text-xs text-slate-400 font-mono">{c.phone || 'Pas de téléphone'}</div>
+                                        </div>
+                                        <ChevronRight size={20} className="text-slate-300 group-hover:text-amber-500"/>
+                                    </button>
+                                ))}
+                                {filteredClients.length === 0 && (
+                                    <div className="text-center py-10 text-slate-400">Aucun client trouvé.</div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* STEP 2: CART BUILDING */}
+                {step === 2 && (
+                    <div className="flex-1 overflow-hidden flex flex-col md:flex-row">
+                        
+                        {/* LEFT: PRODUCTS LIST */}
+                        <div className="w-full md:w-[65%] p-6 flex flex-col border-r border-slate-200 bg-white">
+                            <div className="relative mb-4">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18}/>
+                                <input 
+                                    autoFocus 
+                                    type="text" 
+                                    placeholder="Chercher un produit..." 
+                                    className="w-full pl-10 p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-amber-500/50 transition-all font-bold"
+                                    value={searchTerm} 
+                                    onChange={e => setSearchTerm(e.target.value)} 
+                                />
+                            </div>
+
+                            <div className="flex-1 overflow-y-auto grid grid-cols-2 lg:grid-cols-3 gap-3 pr-2 custom-scrollbar content-start">
+                                {filteredProducts.map(p => (
+                                    <button 
+                                        key={p.id} 
+                                        onClick={() => addToCart(p)} 
+                                        className="flex flex-col p-3 border border-slate-100 rounded-xl hover:border-amber-400 hover:shadow-md transition-all text-left bg-slate-50 hover:bg-white group h-[100px] justify-between"
+                                    >
+                                        <div className="font-bold text-slate-700 text-sm line-clamp-2 leading-tight group-hover:text-amber-800">{p.name}</div>
+                                        <div className="flex justify-between items-end mt-2">
+                                            <div className="text-[10px] text-slate-400 font-medium bg-white px-1.5 py-0.5 rounded border border-slate-200">Stock: {p.quantity}</div>
+                                            <div className="font-mono font-bold text-amber-600">{formatMoney(p.sellingPrice)}</div>
+                                        </div>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* RIGHT: CART SUMMARY */}
+                        <div className="w-full md:w-[35%] bg-slate-50 flex flex-col border-l border-white shadow-2xl relative z-10">
+                            
+                            {/* Client Header */}
+                            <div className="p-4 bg-amber-100 border-b border-amber-200 flex justify-between items-center">
+                                <div className="flex items-center gap-2 text-amber-900 font-bold">
+                                    <User size={18}/> {selectedClient.name}
+                                </div>
+                                <button onClick={() => setStep(1)} className="text-xs text-amber-700 hover:underline">Changer</button>
+                            </div>
+
+                            {/* Items List */}
+                            <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+                                {cart.length === 0 ? (
+                                    <div className="h-full flex flex-col items-center justify-center text-slate-400 opacity-60">
+                                        <ShoppingCart size={48} strokeWidth={1} className="mb-2"/>
+                                        <p>Le panier est vide</p>
+                                    </div>
+                                ) : (
+                                    cart.map(item => (
+                                        <div key={item.id} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-2">
+                                            <div className="flex justify-between items-start">
+                                                <div className="font-bold text-slate-700 text-sm leading-tight">{item.name}</div>
+                                                <button onClick={() => removeFromCart(item.id)} className="text-slate-300 hover:text-red-500"><Trash2 size={14}/></button>
+                                            </div>
+                                            <div className="flex justify-between items-center bg-slate-50 p-1.5 rounded-lg">
+                                                <div className="flex items-center gap-2">
+                                                    <button onClick={() => updateQuantity(item.id, -1)} className="w-6 h-6 bg-white border rounded text-xs font-bold hover:bg-slate-100">-</button>
+                                                    <span className="text-sm font-bold w-6 text-center">{item.quantity}</span>
+                                                    <button onClick={() => updateQuantity(item.id, 1)} className="w-6 h-6 bg-white border rounded text-xs font-bold hover:bg-slate-100">+</button>
+                                                </div>
+                                                <div className="font-mono font-bold text-slate-700">{formatMoney(item.unitPrice * item.quantity)}</div>
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+
+                            {/* Footer Actions */}
+                            <div className="p-5 bg-white border-t border-slate-200 shadow-[0_-10px_30px_rgba(0,0,0,0.05)]">
+                                <div className="flex justify-between items-center mb-4">
+                                    <span className="text-sm font-bold text-slate-500 uppercase">Total Estimé</span>
+                                    <span className="text-2xl font-black text-amber-600">{formatMoney(totalAmount)} <span className="text-sm text-slate-400">MAD</span></span>
+                                </div>
+                                <button 
+                                    onClick={handleSubmit} 
+                                    disabled={loading || cart.length === 0}
+                                    className="w-full py-4 bg-amber-500 hover:bg-amber-600 text-white font-black rounded-xl shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                                >
+                                    {loading ? 'Enregistrement...' : <>ENREGISTRER LE DEVIS <Calculator size={18}/></>}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};

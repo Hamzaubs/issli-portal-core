@@ -1,0 +1,16 @@
+{
+  "status": "success",
+  "data": {
+    "totalCA": 450000.00,
+    "totalProfits": 125000.50,
+    "salesCount": 342,
+    "period": {
+      "startDate": "2026-01-01T00:00:00.000Z",
+      "endDate": "2026-01-31T23:59:59.999Z"
+    }
+  },
+  "meta": {
+    "currency": "MAD",
+    "source": "Aggregated (Stock A + Stock B)"
+  }
+}

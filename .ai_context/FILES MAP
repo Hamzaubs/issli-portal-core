@@ -1,0 +1,4 @@
+packages/db-legal/prisma/schema.prisma	✅ Fixed	Re-aligned output path to root node_modules.
+apps/api/src/controllers/DashboardController.ts	✅ Updated	Debt Logic: Sales on Credit/Delivery increase balance; Returns decrease it.
+apps/web-ui/src/components/StockDashboard.tsx	✅ Updated	POS Interface: Added selector for Payment Method (Cash/Credit/Check/Delivery).
+apps/web-ui/src/components/ClientManager.tsx	✅ Updated	Debt Management: Added balance display and "Régler" (Payment) modal.

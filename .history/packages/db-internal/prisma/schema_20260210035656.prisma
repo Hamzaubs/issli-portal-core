@@ -1,0 +1,119 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../../node_modules/@prisma/client-stock-b"
+  
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL_INTERNAL")
+}
+
+model ProductB {
+  id             String   @id @default(uuid())
+  name           String   @db.VarChar(255)
+  internalSku    String   @unique @map("internal_sku") @db.VarChar(50)
+  
+  purchaseCost   Decimal  @map("purchase_cost") @db.Decimal(10, 2)
+  sellingPrice   Decimal  @map("selling_price") @db.Decimal(10, 2)
+  
+  quantity       Int      @default(0)
+  measureUnit    String   @default("UNIT") 
+  technicalSpecs String?  @map("technical_specs")
+  
+  movements      StockMovement[]
+
+  @@map("products_internal")
+}
+
+model ClientB {
+  id        String   @id @default(uuid())
+  name      String   @db.VarChar(255)
+  
+  // ✅ Synchronization Keys (Required to link with Silo A)
+  phone     String?  @db.VarChar(50)
+  ice       String?  @db.VarChar(50)
+  address   String?  @db.Text
+  city      String?  @db.VarChar(100)
+
+  category  String   @default("STANDARD")
+  notes     String?  @db.Text
+  
+  // Financials
+  totalSpent Decimal  @default(0) @map("total_spent") @db.Decimal(10, 2)
+  balance    Decimal  @default(0) @db.Decimal(10, 2) // Positive = Debt
+
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  movements  StockMovement[]
+  // ❌ Removed 'payments' relation because we deleted the ClientPayment table
+
+  @@map("clients_internal")
+  @@index([name])
+  @@index([phone])
+  @@index([ice])
+}
+
+// ❌ ClientPayment Table REMOVED (Redundant)
+
+model StockMovement {
+  id             String   @id @default(uuid())
+  
+  // Relationships
+  productId      String   @map("product_id")
+  product        ProductB @relation(fields: [productId], references: [id])
+
+  clientId       String?  @map("client_id")
+  client         ClientB? @relation(fields: [clientId], references: [id])
+
+  userId         String?        @map("user_id")
+  user           User?          @relation(fields: [userId], references: [id])
+
+  // Core Data
+  quantity       Int
+  type           MovementType
+  
+  // Financial Data
+  amount         Decimal?       @db.Decimal(10, 2)
+  paymentMethod  String?        @default("CASH")
+  paymentRef     String?        // ✅ Native column for Checks/Transfers
+
+  // Snapshots for Audit
+  snapshotPurchaseCost Decimal? @map("snapshot_purchase_cost") @db.Decimal(10, 2)
+  snapshotSellingPrice Decimal? @map("snapshot_selling_price") @db.Decimal(10, 2)
+  snapshotProductName  String?  @map("snapshot_product_name") @db.VarChar(255)
+  
+  createdAt      DateTime       @default(now()) @map("created_at") 
+  
+  @@map("movements_internal")
+  @@index([createdAt]) 
+  @@index([productId])
+  @@index([clientId])
+}
+
+model User {
+  id        String    @id @default(uuid())
+  username  String    @unique
+  password  String    
+  role      UserRole  @default(POS_USER) 
+  movements StockMovement[]
+
+  @@map("users_internal")
+}
+
+enum UserRole {
+  SUPER_ADMIN 
+  LEGAL_USER
+  POS_USER        
+}
+
+enum MovementType {
+  SALE_CASH
+  SALE_CREDIT 
+  RESTOCK
+  ADJUSTMENT
+  RETURN 
+  QUOTE
+  PAYMENT     // ✅ Standardized Payment Type
+}

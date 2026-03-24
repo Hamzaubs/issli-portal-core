@@ -1,0 +1,16 @@
+{
+  "name": "@marine/db-legal",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "scripts": {
+    "generate": "prisma generate",
+    "push": "prisma db push",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.10.2"
+  },
+  "devDependencies": {
+    "prisma": "^5.7.0"
+  }
+}

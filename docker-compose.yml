@@ -1,0 +1,29 @@
+version: '3.8'
+services:
+  postgres-a:
+    image: postgres:15-alpine
+    container_name: marine_ops_db_a
+    environment:
+      POSTGRES_USER: admin_legal
+      POSTGRES_PASSWORD: secure_legal_pass
+      POSTGRES_DB: marine_stock_a
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata_a:/var/lib/postgresql/data
+
+  postgres-b:
+    image: postgres:15-alpine
+    container_name: marine_ops_db_b
+    environment:
+      POSTGRES_USER: admin_internal
+      POSTGRES_PASSWORD: secure_internal_pass
+      POSTGRES_DB: marine_stock_b
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata_b:/var/lib/postgresql/data
+
+volumes:
+  pgdata_a:
+  pgdata_b:
