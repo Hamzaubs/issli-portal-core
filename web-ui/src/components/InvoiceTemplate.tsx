@@ -25,6 +25,16 @@ export const InvoiceTemplate = React.forwardRef<HTMLDivElement, InvoiceTemplateP
 
   const formatMAD = (amount: number) => new Intl.NumberFormat('fr-MA', { style: 'currency', currency: 'MAD' }).format(amount);
 
+  // Helper to convert DB unit to display string
+  const getUnitLabel = (unit?: string) => { 
+      switch(unit) { 
+          case 'M': return 'm'; 
+          case 'KG': return 'kg'; 
+          case 'L': return 'L'; 
+          case 'UNIT': default: return 'u'; 
+      } 
+  };
+
   const totalHT = Number(data.totalHT);
   const totalTTC = Number(data.totalTTC);
   const totalVAT = totalTTC - totalHT;
@@ -86,7 +96,7 @@ export const InvoiceTemplate = React.forwardRef<HTMLDivElement, InvoiceTemplateP
             return (
               <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
                 <td className="py-3 px-4 text-sm font-bold text-slate-700">{item.productName}</td>
-                <td className="py-3 px-4 text-center text-sm font-mono">{qty}</td>
+                <td className="py-3 px-4 text-center text-sm font-mono">{qty} <span className="text-[10px] text-slate-500">{getUnitLabel(item.measureUnit)}</span></td>
                 <td className="py-3 px-4 text-center text-sm font-mono">{Math.round(rate * 100)}%</td>
                 <td className="py-3 px-4 text-right text-sm font-mono">{formatMAD(price)}</td>
                 <td className="py-3 px-4 text-right text-sm font-bold">{formatMAD(qty * price)}</td>

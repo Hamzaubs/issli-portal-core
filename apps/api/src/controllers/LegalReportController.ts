@@ -6,6 +6,17 @@ import { Prisma } from '@prisma/client-legal';
 // Helper: Safe Decimal Conversion
 const toDec = (val: any): Prisma.Decimal => new Prisma.Decimal(val || 0);
 
+// 🛡️ MATH ENGINE: Strict Centimes for absolute precision in financial reporting
+const toCents = (n: any): number => {
+    if (!n) return 0;
+    const floatVal = typeof n === 'object' && 'toNumber' in n ? n.toNumber() : Number(n);
+    return Math.round(floatVal * 100);
+};
+
+const fromCents = (cents: number): number => {
+    return Number((cents / 100).toFixed(2));
+};
+
 // Helper: Round & Format for Excel (French format: 10,50)
 const formatExcelNum = (val: Prisma.Decimal | number) => {
     const num = typeof val === 'number' ? val : val.toNumber();
@@ -54,7 +65,6 @@ export const LegalReportController = {
 
       const payments = await prismaLegal.payment.findMany({
           where: { paidAt: { gte: startDate, lte: endDate } },
-          // 🛑 FIX: Include invoice type to subtract refunds accurately
           include: { invoice: { select: { type: true } } }
       });
 
@@ -72,22 +82,21 @@ export const LegalReportController = {
       `;
       const stockValueCost = stockAgg[0]?.totalValue ? new Prisma.Decimal(stockAgg[0].totalValue) : new Prisma.Decimal(0);
 
-      let salesHT = new Prisma.Decimal(0);
-      let salesTTC = new Prisma.Decimal(0);
-      let totalRefundsHT = new Prisma.Decimal(0);
-      let totalCOGS = new Prisma.Decimal(0); 
-      let totalVAT = new Prisma.Decimal(0); 
-      let collectedCash = new Prisma.Decimal(0);
-
-      // 🛑 NEW: Calculate Total Outstanding Debt Safely
-      let currentDebt = new Prisma.Decimal(0);
+      // 🛑 MATH ENGINE: Switch accumulators to cents for absolute precision
+      let salesHTCents = 0;
+      let salesTTCCents = 0;
+      let totalRefundsHTCents = 0;
+      let totalCOGSCents = 0; 
+      let totalVATCents = 0; 
+      let collectedCashCents = 0;
+      let currentDebtCents = 0;
 
       const monthlyStats = Array(12).fill(0).map(() => ({ 
           invoiced: 0, 
           collected: 0, 
           refunds: 0,
-          margin: 0, // Added margin tracking per month
-          revenueHT: 0, // Added HT tracking per month
+          margin: 0, 
+          revenueHT: 0, 
           revenueTTC: 0
       }));
       
@@ -96,107 +105,99 @@ export const LegalReportController = {
 
       for (const inv of invoices) {
           const m = new Date(inv.issuedAt).getMonth();
-          const ht = toDec(inv.totalHT);
-          const ttc = toDec(inv.totalTTC);
-          const vat = ttc.sub(ht);
-          const paid = toDec(inv.amountPaid);
+          const htCents = toCents(inv.totalHT);
+          const ttcCents = toCents(inv.totalTTC);
+          const vatCents = ttcCents - htCents;
+          const paidCents = toCents(inv.amountPaid);
           
-          salesHT = salesHT.add(ht);
-          salesTTC = salesTTC.add(ttc);
-          totalVAT = totalVAT.add(vat);
+          salesHTCents += htCents;
+          salesTTCCents += ttcCents;
+          totalVATCents += vatCents;
           
           if (inv.status === 'EN_ATTENTE' || inv.status === 'PARTIEL') {
-              currentDebt = currentDebt.add(ttc.sub(paid));
+              currentDebtCents += (ttcCents - paidCents);
           }
 
-          let invoiceCOGS = new Prisma.Decimal(0);
+          let invoiceCOGSCents = 0;
 
           inv.items.forEach(item => {
-              const qty = toDec(item.quantity);
-              const cost = toDec(item.unitPurchaseCostSnapshot);
-              const lineCost = cost.mul(qty);
+              const qty = Number(item.quantity);
+              const costCents = toCents(item.unitPurchaseCostSnapshot);
+              const lineCostCents = costCents * qty;
               
-              totalCOGS = totalCOGS.add(lineCost);
-              invoiceCOGS = invoiceCOGS.add(lineCost);
+              totalCOGSCents += lineCostCents;
+              invoiceCOGSCents += lineCostCents;
 
               const pName = item.productName;
-              productSalesMap.set(pName, (productSalesMap.get(pName) || 0) + qty.toNumber());
+              productSalesMap.set(pName, (productSalesMap.get(pName) || 0) + qty);
           });
 
-          monthlyStats[m].invoiced += ht.toNumber();
-          monthlyStats[m].revenueHT += ht.toNumber();
-          monthlyStats[m].revenueTTC += ttc.toNumber();
-          monthlyStats[m].margin += ht.sub(invoiceCOGS).toNumber();
+          monthlyStats[m].invoiced += fromCents(htCents);
+          monthlyStats[m].revenueHT += fromCents(htCents);
+          monthlyStats[m].revenueTTC += fromCents(ttcCents);
+          monthlyStats[m].margin += fromCents(htCents - invoiceCOGSCents);
 
           const cName = inv.clientNameSnapshot || "Client Inconnu";
-          clientSalesMap.set(cName, (clientSalesMap.get(cName) || 0) + ht.toNumber());
+          clientSalesMap.set(cName, (clientSalesMap.get(cName) || 0) + fromCents(htCents));
       }
 
       for (const ref of refunds) {
           const m = new Date(ref.issuedAt).getMonth();
-          const ht = toDec(ref.totalHT);
-          const ttc = toDec(ref.totalTTC);
-          const vat = ttc.sub(ht);
+          const htCents = toCents(ref.totalHT);
+          const ttcCents = toCents(ref.totalTTC);
+          const vatCents = ttcCents - htCents;
 
-          totalRefundsHT = totalRefundsHT.add(ht);
-          salesHT = salesHT.sub(ht); 
-          totalVAT = totalVAT.sub(vat);
+          totalRefundsHTCents += htCents;
+          salesHTCents -= htCents; 
+          totalVATCents -= vatCents;
           
-          monthlyStats[m].refunds += ht.toNumber();
-          monthlyStats[m].revenueHT -= ht.toNumber();
-          monthlyStats[m].revenueTTC -= ttc.toNumber();
+          monthlyStats[m].refunds += fromCents(htCents);
+          monthlyStats[m].revenueHT -= fromCents(htCents);
+          monthlyStats[m].revenueTTC -= fromCents(ttcCents);
 
-          let refundCOGS = new Prisma.Decimal(0);
+          let refundCOGSCents = 0;
 
           ref.items.forEach(item => {
-              const qty = toDec(item.quantity);
-              const cost = toDec(item.unitPurchaseCostSnapshot);
-              const lineCost = cost.mul(qty);
+              const qty = Number(item.quantity);
+              const costCents = toCents(item.unitPurchaseCostSnapshot);
+              const lineCostCents = costCents * qty;
               
-              totalCOGS = totalCOGS.sub(lineCost);
-              refundCOGS = refundCOGS.add(lineCost);
+              totalCOGSCents -= lineCostCents;
+              refundCOGSCents += lineCostCents;
           });
           
-          monthlyStats[m].margin -= ht.sub(refundCOGS).toNumber();
+          monthlyStats[m].margin -= fromCents(htCents - refundCOGSCents);
       }
 
-      // 🛑 CASH PROCESSOR (Refund & Compensation Shield)
-      let todayCash = new Prisma.Decimal(0);
+      // 🛑 CASH PROCESSOR
+      let todayCashCents = 0;
       const todayStart = new Date();
       todayStart.setHours(0,0,0,0);
 
       for (const pay of payments) {
           const m = new Date(pay.paidAt).getMonth();
-          const amount = toDec(pay.amount);
+          const amountCents = toCents(pay.amount);
           const method = String(pay.method).toUpperCase();
 
-          // Ignore virtual compensation
           if (method === 'COMPENSATION' || method === 'AVOIR') continue;
 
           if (pay.invoice?.type === 'AVOIR') {
-              // Subtract Refund Payments
-              collectedCash = collectedCash.sub(amount);
-              monthlyStats[m].collected -= amount.toNumber();
-              if (pay.paidAt >= todayStart) todayCash = todayCash.sub(amount);
+              collectedCashCents -= amountCents;
+              monthlyStats[m].collected -= fromCents(amountCents);
+              if (pay.paidAt >= todayStart) todayCashCents -= amountCents;
           } else {
-              // Add Normal Payments
-              collectedCash = collectedCash.add(amount);
-              monthlyStats[m].collected += amount.toNumber();
-              if (pay.paidAt >= todayStart) todayCash = todayCash.add(amount);
+              collectedCashCents += amountCents;
+              monthlyStats[m].collected += fromCents(amountCents);
+              if (pay.paidAt >= todayStart) todayCashCents += amountCents;
           }
       }
 
-      const grossMargin = salesHT.sub(totalCOGS);
-      const marginRate = !salesHT.isZero() ? grossMargin.div(salesHT).mul(100) : new Prisma.Decimal(0);
+      const grossMarginCents = salesHTCents - totalCOGSCents;
+      const marginRate = salesHTCents !== 0 ? (grossMarginCents / salesHTCents) * 100 : 0;
       
-      const periodBalance = salesTTC.sub(toDec(refunds.reduce((sum, r) => sum + Number(r.totalTTC), 0))).sub(collectedCash);
+      const totalRefundsTTCCents = refunds.reduce((sum, r) => sum + toCents(r.totalTTC), 0);
+      const periodBalanceCents = salesTTCCents - totalRefundsTTCCents - collectedCashCents;
 
-      const round = (val: Prisma.Decimal | number) => {
-        const num = typeof val === 'number' ? val : val.toNumber();
-        return Math.round(num * 100) / 100;
-      };
-
-      // ✅ ADDED DYNAMIC QUOTES AGGREGATION TO PREVENT UI CRASH
       const activeQuotes = await prismaLegal.invoice.aggregate({
           where: { type: 'DEVIS', status: { not: 'ANNULEE' } }, 
           _sum: { totalTTC: true },
@@ -205,34 +206,34 @@ export const LegalReportController = {
 
       res.json({
         kpi: {
-            netRevenue: round(salesHT),
-            grossMargin: round(grossMargin),
-            marginRate: round(marginRate),
-            totalRefunds: round(totalRefundsHT),
+            netRevenue: fromCents(salesHTCents),
+            grossMargin: fromCents(grossMarginCents),
+            marginRate: Math.round(marginRate * 100) / 100,
+            totalRefunds: fromCents(totalRefundsHTCents),
             
-            collectedCash: round(collectedCash),
-            periodBalance: round(periodBalance), 
+            collectedCash: fromCents(collectedCashCents),
+            periodBalance: fromCents(periodBalanceCents), 
             
-            stockValue: round(stockValueCost), 
-            invoicedVAT: round(totalVAT),
+            stockValue: Number(stockValueCost), 
+            invoicedVAT: fromCents(totalVATCents),
 
-            // 🛑 INJECTED HT/TTC/DEBT DATA NEEDED BY THE UI
-            yearlyHT: round(salesHT),
-            yearlyTTC: round(salesTTC),
-            yearlyMargin: round(grossMargin),
-            revenueToday: round(todayCash),
-            totalDebt: round(currentDebt),
+            yearlyHT: fromCents(salesHTCents),
+            yearlyTTC: fromCents(salesTTCCents),
+            yearlyMargin: fromCents(grossMarginCents),
+            revenueToday: fromCents(todayCashCents),
+            totalDebt: fromCents(currentDebtCents),
             quotesVolume: activeQuotes._sum.totalTTC ? activeQuotes._sum.totalTTC.toNumber() : 0,
             quotesCount: Number(activeQuotes._count)
         },
         charts: {
             monthly: monthlyStats.map(m => ({ 
-                revenue: round(m.invoiced), 
-                collected: round(m.collected), 
-                refunds: round(m.refunds),
-                revenueHT: round(m.revenueHT), // UI needs this for Bar Chart
-                revenueTTC: round(m.revenueTTC),
-                margin: round(m.margin)
+                ...m,
+                revenue: Math.round(m.invoiced * 100) / 100,
+                collected: Math.round(m.collected * 100) / 100,
+                refunds: Math.round(m.refunds * 100) / 100,
+                revenueHT: Math.round(m.revenueHT * 100) / 100,
+                revenueTTC: Math.round(m.revenueTTC * 100) / 100,
+                margin: Math.round(m.margin * 100) / 100
             })),
             topProducts: Array.from(productSalesMap.entries()).map(([name, total]) => ({ name, total })).sort((a, b) => b.total - a.total).slice(0, 5),
             topClients: Array.from(clientSalesMap.entries()).map(([name, total]) => ({ name, total })).sort((a, b) => b.total - a.total).slice(0, 5)
@@ -247,14 +248,13 @@ export const LegalReportController = {
   },
 
   // ====================================================
-  // 📝 EXPORT CSV STREAMING (Fully Connected for Accountant)
+  // 📝 EXPORT CSV STREAMING
   // ====================================================
   getExport: async (req: Request, res: Response) => {
     try {
         const { type } = req.params; 
         const { start, end } = req.query;
 
-        // 🛡️ 1. VALIDATION CHECK FIRST (Prevents the ERR_HTTP_HEADERS_SENT crash)
         const validTypes = ['journal', 'receipts', 'bilan', 'inventory'];
         if (!validTypes.includes(type)) {
             return res.status(400).json({ error: "Type de rapport inconnu" });
@@ -263,7 +263,6 @@ export const LegalReportController = {
         const startDate = new Date(`${start}T00:00:00.000Z`);
         const endDate = new Date(`${end}T23:59:59.999Z`);
 
-        // 🛡️ 2. SAFE TO SET HEADERS NOW
         const filename = `Export_${type}_${start}.csv`;
         res.setHeader('Content-Type', 'text/csv; charset=utf-8');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -277,9 +276,9 @@ export const LegalReportController = {
         if (type === 'journal') {
             res.write("Date;Reference;Client;ICE;Total HT;Total TVA;Total TTC;Etat\n");
             
-            let sumHT = new Prisma.Decimal(0);
-            let sumTVA = new Prisma.Decimal(0);
-            let sumTTC = new Prisma.Decimal(0);
+            let sumHTCents = 0;
+            let sumTVACents = 0;
+            let sumTTCCents = 0;
             let cursor: string | undefined = undefined;
             const BATCH_SIZE = 500;
 
@@ -295,37 +294,42 @@ export const LegalReportController = {
                 if (batch.length === 0) break;
 
                 for (const inv of batch) {
-                    const ht = toDec(inv.totalHT);
-                    const ttc = toDec(inv.totalTTC);
-                    const tva = ttc.sub(ht);
+                    const htCents = toCents(inv.totalHT);
+                    const ttcCents = toCents(inv.totalTTC);
+                    const tvaCents = ttcCents - htCents;
                     
-                    // If it's an AVOIR, deduct it
                     const multiplier = inv.type === 'AVOIR' ? -1 : 1;
                     
-                    sumHT = sumHT.add(ht.mul(multiplier));
-                    sumTVA = sumTVA.add(tva.mul(multiplier));
-                    sumTTC = sumTTC.add(ttc.mul(multiplier));
+                    sumHTCents += (htCents * multiplier);
+                    sumTVACents += (tvaCents * multiplier);
+                    sumTTCCents += (ttcCents * multiplier);
 
-                    const status = inv.status === 'PAYEE' ? 'Payee' : inv.status === 'AVOIR_EMIS' ? 'Rembourse' : 'En Attente';
+                    // 🛑 FIX: Explicitly handle PARTIEL and map the exact strict string.
+                    let statusStr = 'En Attente';
+                    if (inv.status === 'PAYEE') statusStr = 'Payee';
+                    else if (inv.status === 'PARTIEL') statusStr = 'Partiel';
+                    else if (inv.status === 'AVOIR_EMIS') statusStr = 'Rembourse (Avoir)';
+                    else if (inv.status === 'AVOIR_PARTIEL') statusStr = 'Avoir Partiel';
+
                     const sign = inv.type === 'AVOIR' ? '-' : '';
                     
-                    res.write(`${fmtDate(inv.issuedAt)};${clean(inv.reference)};${clean(inv.clientNameSnapshot)};${clean(inv.clientIceSnapshot)};${sign}${formatExcelNum(ht)};${sign}${formatExcelNum(tva)};${sign}${formatExcelNum(ttc)};${status}\n`);
+                    res.write(`${fmtDate(inv.issuedAt)};${clean(inv.reference)};${clean(inv.clientNameSnapshot)};${clean(inv.clientIceSnapshot)};${sign}${formatExcelNum(fromCents(htCents))};${sign}${formatExcelNum(fromCents(tvaCents))};${sign}${formatExcelNum(fromCents(ttcCents))};${statusStr}\n`);
                 }
 
                 cursor = batch[batch.length - 1].id;
                 if (batch.length < BATCH_SIZE) break;
             }
 
-            res.write(`;;;TOTAUX;${formatExcelNum(sumHT)};${formatExcelNum(sumTVA)};${formatExcelNum(sumTTC)};\n`);
+            res.write(`;;;TOTAUX;${formatExcelNum(fromCents(sumHTCents))};${formatExcelNum(fromCents(sumTVACents))};${formatExcelNum(fromCents(sumTTCCents))};\n`);
         }
 
         // 4. RELEVE DE TVA (SUR ENCAISSEMENT)
         else if (type === 'receipts') {
             res.write("Date;Ref Paiement;Client;Facture Liee;Mode;Montant Paye TTC;Base HT Estimee;TVA Collectee\n");
             
-            let totalCash = new Prisma.Decimal(0);
-            let totalBaseHT = new Prisma.Decimal(0);
-            let totalTVA = new Prisma.Decimal(0);
+            let totalCashCents = 0;
+            let totalBaseHTCents = 0;
+            let totalTVACents = 0;
             let cursor: string | undefined = undefined;
             const BATCH_SIZE = 500;
 
@@ -342,30 +346,33 @@ export const LegalReportController = {
                 if (batch.length === 0) break;
 
                 for (const pay of batch) {
-                    const amountTTC = toDec(pay.amount);
-                    totalCash = totalCash.add(amountTTC);
+                    const amountTTCCents = toCents(pay.amount);
+                    totalCashCents += amountTTCCents;
                     
-                    // Estimate the TVA portion based on the linked invoice's global ratio
-                    let baseHT = new Prisma.Decimal(0);
-                    let tvaAmount = new Prisma.Decimal(0);
+                    let baseHTCents = 0;
+                    let tvaAmountCents = 0;
                     
                     if (pay.invoice && !toDec(pay.invoice.totalTTC).isZero()) {
-                        const ratioHT = toDec(pay.invoice.totalHT).div(toDec(pay.invoice.totalTTC));
-                        baseHT = amountTTC.mul(ratioHT);
-                        tvaAmount = amountTTC.sub(baseHT);
+                        const invHTCents = toCents(pay.invoice.totalHT);
+                        const invTTCCents = toCents(pay.invoice.totalTTC);
                         
-                        totalBaseHT = totalBaseHT.add(baseHT);
-                        totalTVA = totalTVA.add(tvaAmount);
+                        // Calculate ratio safely
+                        const ratioHT = invHTCents / invTTCCents;
+                        baseHTCents = Math.round(amountTTCCents * ratioHT);
+                        tvaAmountCents = amountTTCCents - baseHTCents;
+                        
+                        totalBaseHTCents += baseHTCents;
+                        totalTVACents += tvaAmountCents;
                     }
 
-                    res.write(`${fmtDate(pay.paidAt)};${clean(pay.reference || "-")};${clean(pay.invoice?.clientNameSnapshot)};${clean(pay.invoice?.reference)};${clean(pay.method)};${formatExcelNum(amountTTC)};${formatExcelNum(baseHT)};${formatExcelNum(tvaAmount)}\n`);
+                    res.write(`${fmtDate(pay.paidAt)};${clean(pay.reference || "-")};${clean(pay.invoice?.clientNameSnapshot)};${clean(pay.invoice?.reference)};${clean(pay.method)};${formatExcelNum(fromCents(amountTTCCents))};${formatExcelNum(fromCents(baseHTCents))};${formatExcelNum(fromCents(tvaAmountCents))}\n`);
                 }
 
                 cursor = batch[batch.length - 1].id;
                 if (batch.length < BATCH_SIZE) break;
             }
 
-            res.write(`;;;;TOTAL;${formatExcelNum(totalCash)};${formatExcelNum(totalBaseHT)};${formatExcelNum(totalTVA)}\n`);
+            res.write(`;;;;TOTAL;${formatExcelNum(fromCents(totalCashCents))};${formatExcelNum(fromCents(totalBaseHTCents))};${formatExcelNum(fromCents(totalTVACents))}\n`);
         }
 
         // 5. SITUATION BILAN (ACTIF)
@@ -381,17 +388,20 @@ export const LegalReportController = {
             const stockValue = stockAgg[0]?.totalValue ? new Prisma.Decimal(stockAgg[0].totalValue) : new Prisma.Decimal(0);
             res.write(`ACTIF IMMOBILISE (STOCK HT);${formatExcelNum(stockValue)}\n`);
 
-            // B. Créances Clients (Unpaid invoices)
+            // 🛑 FIX: B. Créances Clients (Math in Cents to avoid floating debt)
             const unpaidInvoices = await prismaLegal.invoice.findMany({
                 where: { type: 'FACTURE', status: { in: ['EN_ATTENTE', 'PARTIEL'] } }
             });
-            const creancesTTC = unpaidInvoices.reduce((sum, inv) => {
-                const due = toDec(inv.totalTTC).sub(toDec(inv.amountPaid));
-                return sum.add(due);
-            }, new Prisma.Decimal(0));
-            res.write(`CREANCES CLIENTS (TTC);${formatExcelNum(creancesTTC)}\n`);
+            
+            const creancesTTCCents = unpaidInvoices.reduce((sumCents, inv) => {
+                const ttcCents = toCents(inv.totalTTC);
+                const paidCents = toCents(inv.amountPaid);
+                return sumCents + (ttcCents - paidCents);
+            }, 0);
+            
+            res.write(`CREANCES CLIENTS (TTC);${formatExcelNum(fromCents(creancesTTCCents))}\n`);
 
-            // C. Trésorerie (All payments in period)
+            // C. Trésorerie
             const payments = await prismaLegal.payment.aggregate({
                 _sum: { amount: true },
                 where: { paidAt: { gte: startDate, lte: endDate } }
@@ -404,7 +414,7 @@ export const LegalReportController = {
         else if (type === 'inventory') {
             res.write("Reference;Designation;Quantite;Unite;PAMP (Cout);Prix Vente (HT);Valeur Stock (HT)\n");
             
-            let totalValue = new Prisma.Decimal(0);
+            let totalValueCents = 0;
             let cursor: string | undefined = undefined;
             const BATCH_SIZE = 500;
 
@@ -419,19 +429,19 @@ export const LegalReportController = {
                 if (products.length === 0) break;
 
                 for (const p of products) {
-                    const qty = toDec(p.quantity);
-                    const cost = toDec(p.purchaseCost);
-                    const val = qty.mul(cost);
+                    const qty = Number(p.quantity);
+                    const costCents = toCents(p.purchaseCost);
+                    const valCents = Math.round(qty * costCents);
                     
-                    totalValue = totalValue.add(val);
-                    res.write(`${clean(p.serialNumber)};${clean(p.name)};${formatExcelNum(qty)};${clean(p.measureUnit)};${formatExcelNum(cost)};${formatExcelNum(toDec(p.priceHT))};${formatExcelNum(val)}\n`);
+                    totalValueCents += valCents;
+                    res.write(`${clean(p.serialNumber)};${clean(p.name)};${formatExcelNum(qty)};${clean(p.measureUnit)};${formatExcelNum(fromCents(costCents))};${formatExcelNum(Number(p.priceHT))};${formatExcelNum(fromCents(valCents))}\n`);
                 }
 
                 cursor = products[products.length - 1].id;
                 if (products.length < BATCH_SIZE) break;
             }
 
-            res.write(`;;;;;;${formatExcelNum(totalValue)}\n`);
+            res.write(`;;;;;;${formatExcelNum(fromCents(totalValueCents))}\n`);
         }
 
         res.end();

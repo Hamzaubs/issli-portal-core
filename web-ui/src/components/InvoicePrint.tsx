@@ -144,11 +144,11 @@ export const InvoicePrint = ({ invoice, onClose }: { invoice: Invoice; onClose: 
         {/* TOOLBAR */}
         <div className="bg-white border-b border-gray-200 p-4 flex justify-between items-center shadow-sm z-50">
           <div className="flex items-center gap-2 text-slate-700 font-bold">
-              <Printer size={20} className="text-blue-900" /> 
+              <Printer size={20} className="text-emerald-800" /> 
               <span>APERÇU DOCUMENT (STOCK A)</span>
           </div>
           <div className="flex gap-3">
-            <button onClick={() => handlePrint()} className="flex items-center gap-2 bg-slate-900 text-white hover:bg-slate-800 px-6 py-2 rounded-lg font-bold transition-all shadow-lg"><Printer size={18} /> IMPRIMER</button>
+            <button onClick={() => handlePrint()} className="flex items-center gap-2 bg-emerald-800 text-white hover:bg-emerald-900 px-6 py-2 rounded-lg font-bold transition-all shadow-lg"><Printer size={18} /> IMPRIMER</button>
             <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors"><X size={24} /></button>
           </div>
         </div>
@@ -156,24 +156,26 @@ export const InvoicePrint = ({ invoice, onClose }: { invoice: Invoice; onClose: 
         {/* PREVIEW */}
         <div className="flex-1 overflow-auto bg-slate-200 p-8 flex justify-center">
           <div ref={componentRef} className="bg-white w-[210mm] min-h-[297mm] p-[15mm] text-slate-900 relative text-sm shadow-xl flex flex-col">
-            <style>{`@media print { @page { size: A4; margin: 0; } body { -webkit-print-color-adjust: exact; } }`}</style>
+            <style>{`@media print { @page { size: A4; margin: 0; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }`}</style>
             
             {isCancelled && <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0"><div className="border-[8px] border-red-500/20 text-red-500/20 text-[8rem] font-black uppercase -rotate-45 p-10 rounded-3xl">{invoice.status}</div></div>}
 
-            {/* HEADER */}
+            {/* HEADER - NEW GREEN PROFESSIONAL DESIGN */}
             <div className="flex justify-between items-start mb-8 pb-6 border-b-2 border-slate-900 relative z-10">
                 <div className="w-[60%]">
-                    <div className="flex items-center gap-3 mb-3">
-                        <div className="w-14 h-14 bg-blue-900 rounded-lg flex items-center justify-center text-white font-black text-xs shadow-sm">LOGO</div>
-                        <div>
-                            <h1 className="text-2xl font-black uppercase text-slate-900 leading-none">ISSLI PECHE <span className="text-sm font-bold text-slate-500">S.A.R.L</span></h1>
-                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Équipement Marine</span>
+                    <div className="mb-4">
+                        <h1 className="text-4xl font-black tracking-tighter text-emerald-800 leading-none print:text-emerald-800">
+                            ISSLI PECHE <span className="text-xl font-medium text-slate-500 tracking-normal ml-1">S.A.R.L</span>
+                        </h1>
+                        <div className="flex items-center gap-2 mt-2">
+                            <div className="h-1.5 w-10 bg-emerald-600 rounded-full print:bg-emerald-600"></div>
+                            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Équipement Marine</span>
                         </div>
                     </div>
-                    <div className="text-[10px] text-slate-500 space-y-1 pl-1">
-                      <div className="flex items-center gap-2"><MapPin size={12} className="text-slate-400"/> 19, Rue Bni Aamir - Bourgogne - Casablanca</div>
-                      <div className="flex items-center gap-2"><Phone size={12} className="text-slate-400"/> Tél/Fax : +212 5 22 20 51 96</div>
-                      <div className="flex items-center gap-2"><Mail size={12} className="text-slate-400"/> isslipeche@yahoo.fr</div>
+                    <div className="text-[10px] text-slate-500 space-y-1 pl-1 border-l-2 border-slate-100">
+                      <div className="flex items-center gap-2 pl-2"><MapPin size={12} className="text-slate-400"/> 19, Rue Bni Aamir - Bourgogne - Casablanca</div>
+                      <div className="flex items-center gap-2 pl-2"><Phone size={12} className="text-slate-400"/> Tél/Fax : +212 5 22 20 51 96</div>
+                      <div className="flex items-center gap-2 pl-2"><Mail size={12} className="text-slate-400"/> isslipeche@yahoo.fr</div>
                     </div>
                 </div>
                 <div className="text-right">
@@ -186,7 +188,7 @@ export const InvoicePrint = ({ invoice, onClose }: { invoice: Invoice; onClose: 
             {/* CLIENT BOX */}
             <div className="flex justify-end mb-10 relative z-10">
                 <div className="w-[50%] bg-slate-50 rounded-xl border border-slate-200 p-5 shadow-sm">
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Facturé à</p>
+                    <p className="text-[10px] font-bold text-emerald-700 uppercase tracking-widest mb-2 print:text-emerald-700">Facturé à</p>
                     <h3 className="text-lg font-bold text-slate-900 mb-1">{clientData.name}</h3>
                     <div className="text-[11px] text-slate-600 space-y-1">
                         <p>ICE: <span className="font-mono font-bold text-slate-800">{clientData.ice}</span></p>
@@ -199,7 +201,7 @@ export const InvoicePrint = ({ invoice, onClose }: { invoice: Invoice; onClose: 
 
             {/* TABLE */}
             <table className="w-full mb-8 relative z-10">
-              <thead className="bg-slate-100 text-slate-700 text-[10px] font-bold uppercase border-y border-slate-200">
+              <thead className="bg-emerald-50/50 text-emerald-900 text-[10px] font-bold uppercase border-y border-emerald-100 print:bg-emerald-50/50">
                 <tr><th className="py-3 px-3 text-left">Désignation</th><th className="py-3 px-3 text-center">Qté</th><th className="py-3 px-3 text-right">P.U. HT</th><th className="py-3 px-3 text-right">Total HT</th></tr>
               </thead>
               <tbody className="text-xs">
@@ -222,7 +224,7 @@ export const InvoicePrint = ({ invoice, onClose }: { invoice: Invoice; onClose: 
             <div className="flex justify-between items-start mt-auto relative z-10">
               {/* LEFT: VAT & LEGAL */}
               <div className="w-[50%] text-[10px]">
-                    <p className="font-bold text-slate-400 uppercase text-[9px] mb-2">Récapitulatif TVA</p>
+                    <p className="font-bold text-emerald-800 uppercase text-[9px] mb-2 print:text-emerald-800">Récapitulatif TVA</p>
                     <table className="w-full text-slate-600 mb-6 border border-slate-200 rounded overflow-hidden">
                       <thead className="bg-slate-50 font-bold text-slate-800"><tr><th className="p-2 text-left">Taux</th><th className="p-2 text-right">Base HT</th><th className="p-2 text-right">Montant TVA</th></tr></thead>
                       <tbody>
@@ -240,9 +242,9 @@ export const InvoicePrint = ({ invoice, onClose }: { invoice: Invoice; onClose: 
                     <div className="flex justify-between text-slate-500 border-b border-slate-100 pb-1"><span>Total TVA</span><span className="font-bold text-slate-800">{formatMAD(Math.abs(invoice.totalTTC - invoice.totalHT))}</span></div>
                     
                     {/* TOTAL BLOCK (CLEANED - NO DEBT INFO) */}
-                    <div className={`flex justify-between items-center bg-slate-100 p-2 rounded-lg mt-2 border ${isCreditNote ? 'border-red-200' : 'border-slate-200'}`}>
-                        <span className={`font-bold uppercase text-xs ${isCreditNote ? 'text-red-700' : 'text-slate-700'}`}>{isCreditNote ? 'Total Avoir' : 'Total TTC'}</span>
-                        <span className={`font-black text-xl ${isCreditNote ? 'text-red-600' : 'text-slate-900'}`}>{formatMAD(Math.abs(invoice.totalTTC))}</span>
+                    <div className={`flex justify-between items-center p-2 rounded-lg mt-2 border ${isCreditNote ? 'border-red-200 bg-red-50/50 print:bg-red-50/50' : 'border-emerald-200 bg-emerald-50/50 print:bg-emerald-50/50'}`}>
+                        <span className={`font-bold uppercase text-xs ${isCreditNote ? 'text-red-700' : 'text-emerald-900 print:text-emerald-900'}`}>{isCreditNote ? 'Total Avoir' : 'Total TTC'}</span>
+                        <span className={`font-black text-xl ${isCreditNote ? 'text-red-600' : 'text-emerald-800 print:text-emerald-800'}`}>{formatMAD(Math.abs(invoice.totalTTC))}</span>
                     </div>
 
                     {/* PAYMENT MODE DISPLAY (CLEANED - NO REMAINDER INFO) */}
@@ -261,7 +263,7 @@ export const InvoicePrint = ({ invoice, onClose }: { invoice: Invoice; onClose: 
             {/* 🛡️ LEGAL AMOUNT IN WORDS (MANDATORY IN MOROCCO) */}
             <div className="mt-4 mb-2 p-3 bg-slate-50 border border-slate-200 rounded text-xs font-bold text-slate-700 text-center">
                 Arrêté {isDevis ? 'le présent devis' : isCreditNote ? 'le présent avoir' : 'la présente facture'} à la somme de :<br/>
-                <span className="text-sm font-black text-blue-900 mt-1 block">{numberToFrenchWords(Math.abs(invoice.totalTTC))}</span>
+                <span className="text-sm font-black text-emerald-800 mt-1 block uppercase print:text-emerald-800">{numberToFrenchWords(Math.abs(invoice.totalTTC))}</span>
             </div>
 
             {/* LEGAL FOOTER */}
@@ -277,8 +279,8 @@ export const InvoicePrint = ({ invoice, onClose }: { invoice: Invoice; onClose: 
                     </div>
                 ) : null}
 
-                <div className="text-center text-[8px] text-slate-500 border-t-2 border-slate-200 pt-3 mt-4 leading-relaxed">
-                    <p className="font-bold text-slate-700 uppercase mb-1">ISSLI PECHE S.A.R.L - Société à Responsabilité Limitée au capital de 1 500 000 MAD</p>
+                <div className="text-center text-[8px] text-slate-500 border-t-2 border-emerald-800/20 pt-3 mt-4 leading-relaxed">
+                    <p className="font-bold text-emerald-800 uppercase mb-1 print:text-emerald-800">ISSLI PECHE S.A.R.L - Société à Responsabilité Limitée au capital de 1 500 000 MAD</p>
                     <div className="flex justify-center gap-3 flex-wrap">
                         <span><strong>RC:</strong> 124637 (Casablanca)</span>
                         <span className="text-slate-300">|</span>

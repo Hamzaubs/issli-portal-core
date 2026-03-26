@@ -1,7 +1,7 @@
 # 📋 State Log - ISSLI PECHE ERP
 
 **Last Updated:** March 2026
-**Version:** 4.6.0 - "Precision Ledger, Fiscal Compliance & Treasury Shield"
+**Version:** 4.6.1 - "Precision Ledger, Fiscal Compliance & Treasury Shield"
 **Status:** 🟢 STABLE (SILO A & SILO B LEDGERS FULLY LOCKED & HARMONIZED)
 
 ---
@@ -30,9 +30,11 @@
     * **Atomic Locking:** `prisma.$transaction` prevents partial writes.
 * **Strict State Machine & Overpayment Shield (v4.6.0 ADDITION):** * Documents strictly follow the legal sequence (`EN_ATTENTE` ➡️ `PARTIEL` ➡️ `PAYEE`). 
     * The system physically rejects overpayments (tolerance: 1 centime) to prevent floating/ghost debt.
+    * **(v4.6.1 PATCH):** Controller-level math engine strictly enforces the `PARTIEL` and `PAYEE` transitions, completely eradicating the "0 DH Impayée" ghost UI bug.
 * **DGI-Compliant PDF Engine (v4.6.0 ADDITION):**
     * Native Number-to-French-Words conversion (*"Arrêtée la présente facture à la somme de..."*).
     * Row-by-row VAT rounding to completely eradicate decimal drift between PDF totals and database totals.
+    * **(v4.6.1 PATCH):** Unit of Measure ("Type de Gestion": KG, L, M, U) is now perfectly extracted from the cart payload and dynamically rendered on the printed A4 templates.
 * **Legacy Exchange Fortification (v4.6.0 ADDITION):** * Bridges old paper returns with new stock. Accurately flags exchange balances as `COMPENSATION` to prevent fake cash injections into analytics.
 
 ### 2. 🏗️ Internal Operations & Analytics Engine (STOCK B)
@@ -44,6 +46,9 @@
     * **Dual Stock Valuation:** Calculates and displays both *Purchase Cost* and *Selling Potential*.
 * **Inventory Bulk Adjustments (v4.6.0 ADDITION):**
     * High-speed `ADJUSTMENT` movement types that correct physical stock without inflating revenue or cost margins.
+* **POS Workflow Defense (v4.6.1 PATCH):**
+    * **Anonymous Checkout Shield:** Custom React DOM modals intercept and require explicit confirmation for "CLIENT COMPTOIR" (no-client) sales or returns, bypassing native browser popup blockers.
+    * **Unit of Measure Integrity:** Internal POS grids and checkout panes now dynamically display and log accurate units (KG, L, M, U) preventing data leaks to the internal delivery notes.
 
 ### 3. 🌍 The Executive Bridge (Global Dashboard)
 * **Polymorphic UI Components:** `ExecutiveDashboard.tsx` dynamically adapts to different JSON payloads (`Silo B` vs `Global`).
@@ -63,6 +68,7 @@
 ### 5. 📊 Fiscal Analytics & Big Data (v4.6.0 ADDITION)
 * **HT/TTC Margin Splitting:** Analytics natively splits Gross Revenue (HT), Net Margins, and Invoiced VAT across the fiscal year.
 * **Memory-Safe Aggregations:** Financial totals (like Global Debt) are strictly processed by PostgreSQL via `_sum`, eradicating RAM leaks previously caused by Node.js mapping arrays of 100k+ rows.
+* **CSV Export Hardening (v4.6.1 PATCH):** Journal des Ventes, Relevé de TVA, Bilan, and Inventory exports now explicitly map `PARTIEL` states and utilize Cent-math to eradicate decimal drift in accountant reports.
 
 ### 6. ⚡ Database Optimization
 * **B-Tree Indexing:** Deployed `@@index` on high-frequency columns (`createdAt`, `type`, `clientId`, `balance`, `status`, `paidAt`).
@@ -77,18 +83,19 @@
 
 ### Backend (`apps/api/src/`)
 * **`controllers/ClientsController.ts`:** (Upgraded) Hosts the bulletproof Silo A Ledger Engine with Cent-based math and Auto-Refund safeguards.
-* **`controllers/InvoicesController.ts`:** (Upgraded) Handles the intelligent `cancelInvoice` lifecycle (Refund vs. Debt Compensation).
+* **`controllers/InvoicesController.ts`:** (Upgraded) Handles the intelligent `cancelInvoice` lifecycle (Refund vs. Debt Compensation) and **(v4.6.1)** strictly locks the `PAYEE`/`PARTIEL` state machine via `toCents()` math.
 * **`controllers/InternalClientController.ts`:** (Upgraded) Hosts the harmonized Silo B Ledger Engine and FIFO Payment Allocator.
 * **`routes/internal.ts` & `routes/legal.ts`:** (Fixed) Correctly mapped decoupled `/statement` endpoints.
 * **`controllers/StatsController.ts` (v4.6.0):** Hosts the flawless A+B Treasury math and RAM-safe aggregation engines.
 * **`services/InvoiceService.ts` (v4.6.0):** The heart of Silo A. Enforces `toCents` math, `PARTIEL` state locking, and strict Deferred Quote (Devis) conversions.
-* **`controllers/LegalReportController.ts` (v4.6.0):** CSV Streaming engine fortified with Compensation-awareness for pristine Accountant exports.
+* **`controllers/LegalReportController.ts`:** (Upgraded) CSV Streaming engine fortified with Compensation-awareness and **(v4.6.1)** Cent-based math for flawless accountant exports.
 
 ### Frontend (`web-ui/src/components/`)
+* **`Dashboard.tsx` (v4.6.1 PATCH):** Upgraded Silo B POS to enforce Anonymous "Client Comptoir" checkout shields and accurately pass physical `measureUnit` data.
 * **`ClientStatement.tsx`:** (Upgraded) Backend-driven Chameleon component for rendering perfect A4 statements for both silos.
-* **`InvoiceWizard.tsx`:** (Upgraded) Hardened to process paginated Big Data responses gracefully (`Array.isArray`).
+* **`InvoiceWizard.tsx`:** (Upgraded) Hardened to process paginated Big Data responses gracefully and **(v4.6.1)** securely attach `measureUnit` payloads.
 * **`GlobalDashboard.tsx` & `ExecutiveDashboard.tsx`:** Complete UI overhaul with dynamic CSS charts.
-* **`InvoicePrint.tsx` (v4.6.0):** Fully DGI-compliant with precise rounding and text-spelling macros.
+* **`InvoicePrint.tsx` & `InvoiceTemplate.tsx` (v4.6.1 PATCH):** Fully DGI-compliant with precise rounding, text-spelling macros, and dynamic "Type de Gestion" (Unit) rendering.
 * **`LegalAnalytics.tsx` (v4.6.0):** Re-mapped to display dynamic HT/TTC, Margin, and Pipeline data gracefully.
 * **`LegalClientProfile.tsx` (v4.6.0):** Hard-linked to backend status strings (`m.status === 'PAYEE'`) to prevent UI floating-point glitches.
 * **`LegacyExchangeWizard.tsx` (v4.6.0):** Wrapped in API pagination shields.

@@ -18,8 +18,18 @@ export const TransactionForm: React.FC<Props> = ({ onClose, onSuccess }) => {
     const [clientId, setClientId] = useState('');
     const [quantity, setQuantity] = useState(1);
     const [paymentMethod, setPaymentMethod] = useState('CASH'); 
-    const [paymentRef, setPaymentRef] = useState(''); // ✅ NEW: State for Check/Transfer numbers
+    const [paymentRef, setPaymentRef] = useState(''); 
     const [loading, setLoading] = useState(false);
+
+    // Helper to format unit for display
+    const getUnitLabel = (unit?: string) => { 
+        switch(unit) { 
+            case 'M': return 'm'; 
+            case 'KG': return 'kg'; 
+            case 'L': return 'L'; 
+            case 'UNIT': default: return 'u'; 
+        } 
+    };
 
     useEffect(() => {
         const load = async () => {
@@ -44,7 +54,7 @@ export const TransactionForm: React.FC<Props> = ({ onClose, onSuccess }) => {
             // Frontend Safety Check
             const product = products.find(p => p.id === productId);
             if (type === 'SALE_CASH' && product && product.quantity < quantity) {
-                 alert(`Stock insuffisant. Disponible : ${product.quantity}`);
+                 alert(`Stock insuffisant. Disponible : ${product.quantity} ${getUnitLabel(product.measureUnit)}`);
                  setLoading(false);
                  return;
             }
@@ -56,7 +66,8 @@ export const TransactionForm: React.FC<Props> = ({ onClose, onSuccess }) => {
                 quantity: Math.floor(Number(quantity)), 
                 clientId: (type === 'SALE_CASH' || type === 'RETURN') ? clientId : undefined,
                 paymentMethod: type === 'SALE_CASH' ? paymentMethod : undefined,
-                paymentRef: (paymentMethod === 'CHECK' || paymentMethod === 'TRANSFER') ? paymentRef : undefined // ✅ Send Ref
+                paymentRef: (paymentMethod === 'CHECK' || paymentMethod === 'TRANSFER') ? paymentRef : undefined,
+                measureUnit: product?.measureUnit || 'UNIT' // 🛑 FIX: Inject measureUnit into Silo B payload
             });
             
             alert("✅ Transaction enregistrée !");
@@ -98,7 +109,7 @@ export const TransactionForm: React.FC<Props> = ({ onClose, onSuccess }) => {
                             value={productId} onChange={e => setProductId(e.target.value)}>
                             <option value="">-- Sélectionner --</option>
                             {products.map(p => (
-                                <option key={p.id} value={p.id}>{p.name} (Stock: {p.quantity})</option>
+                                <option key={p.id} value={p.id}>{p.name} (Stock: {p.quantity} {getUnitLabel(p.measureUnit)})</option>
                             ))}
                         </select>
                     </div>
@@ -138,7 +149,6 @@ export const TransactionForm: React.FC<Props> = ({ onClose, onSuccess }) => {
                                         </select>
                                     </div>
                                     
-                                    {/* ✅ NEW: Dynamic Reference Input */}
                                     {(paymentMethod === 'CHECK' || paymentMethod === 'TRANSFER') && (
                                         <div>
                                             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">

@@ -21,11 +21,21 @@ export const InternalDeliveryNote: React.FC<Props> = ({ data, onClose }) => {
     const formatMAD = (amount: number) => 
         new Intl.NumberFormat('fr-MA', { style: 'currency', currency: 'MAD' }).format(Math.abs(amount));
 
-    // ✅ DYNAMIC DOCUMENT CONFIGURATION FOR DEVIS
+    // 🛑 FIX: Unit formatting logic added
+    const getUnitLabel = (unit?: string) => { 
+        switch(unit) { 
+            case 'M': return 'm'; 
+            case 'KG': return 'kg'; 
+            case 'L': return 'L'; 
+            case 'UNIT': default: return 'u'; 
+        } 
+    };
+
+    // ✅ DYNAMIC DOCUMENT CONFIGURATION
     const docType = data.isQuote ? 'DEVIS' : data.isReturn ? 'BON DE RETOUR' : 'BON DE LIVRAISON';
     const totalLabel = data.isQuote ? 'Total Estimé' : data.isReturn ? 'Total Avoir (Crédit)' : 'Total Net à Payer';
     const subLabel = data.isQuote ? 'Proposition commerciale' : data.isReturn ? 'Montant à déduire ou rembourser' : 'Valeur de la marchandise livrée';
-    const themeColor = data.isReturn ? 'text-red-700' : data.isQuote ? 'text-amber-700' : 'text-slate-900';
+    const themeColor = data.isReturn ? 'text-red-700' : data.isQuote ? 'text-amber-700' : 'text-emerald-900';
     const borderColor = data.isReturn ? 'border-red-900' : data.isQuote ? 'border-amber-900' : 'border-slate-900';
 
     return (
@@ -41,7 +51,7 @@ export const InternalDeliveryNote: React.FC<Props> = ({ data, onClose }) => {
             `}</style>
 
             <div className="absolute top-4 right-4 flex gap-2 print:hidden z-50">
-                <button onClick={() => handlePrint && handlePrint()} className="bg-blue-600 text-white px-6 py-2 rounded-full font-bold shadow-lg hover:bg-blue-700 flex items-center gap-2 transition-all">
+                <button onClick={() => handlePrint && handlePrint()} className="bg-emerald-700 text-white px-6 py-2 rounded-full font-bold shadow-lg hover:bg-emerald-800 flex items-center gap-2 transition-all">
                     <Printer size={18}/> Imprimer
                 </button>
                 <button onClick={onClose} className="bg-slate-800 text-white p-2 rounded-full shadow-lg hover:bg-slate-700 transition-all">
@@ -55,20 +65,22 @@ export const InternalDeliveryNote: React.FC<Props> = ({ data, onClose }) => {
                     {/* HEADER */}
                     <div className={`flex justify-between items-start border-b-2 ${borderColor} pb-6 mb-6`}>
                         <div>
-                            <div className="flex items-center gap-3 mb-2">
-                                <div className="w-10 h-10 bg-slate-900 text-white flex items-center justify-center rounded-lg font-black text-xl print:bg-slate-900 print:text-white">I</div>
-                                <div>
-                                    <h1 className="text-2xl font-black uppercase tracking-tight text-slate-900 leading-none">ISSLI PECHE</h1>
-                                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Équipements Marins (Magasin B)</p>
+                            <div className="mb-3">
+                                <h1 className="text-4xl font-black tracking-tighter text-emerald-800 leading-none print:text-emerald-800">
+                                    ISSLI PECHE
+                                </h1>
+                                <div className="flex items-center gap-2 mt-2">
+                                    <div className="h-1.5 w-10 bg-emerald-600 rounded-full print:bg-emerald-600"></div>
+                                    <span className="text-[11px] text-slate-500 font-bold uppercase tracking-widest">Équipements Marins (Magasin B)</span>
                                 </div>
                             </div>
-                            <div className="text-xs text-slate-500 space-y-1 mt-2">
-                                <p className="flex items-center gap-2"><MapPin size={12}/> 19, Rue Bni Aamir, Casablanca</p>
-                                <p className="flex items-center gap-2"><Phone size={12}/> +212 5 22 20 51 96</p>
+                            <div className="text-xs text-slate-500 space-y-1 mt-2 border-l-2 border-slate-100 pl-2">
+                                <p className="flex items-center gap-2"><MapPin size={12} className="text-slate-400"/> 19, Rue Bni Aamir, Casablanca</p>
+                                <p className="flex items-center gap-2"><Phone size={12} className="text-slate-400"/> +212 5 22 20 51 96</p>
                             </div>
                         </div>
                         <div className="text-right">
-                            <h2 className={`text-3xl font-black uppercase mb-1 tracking-tighter ${themeColor}`}>{docType}</h2>
+                            <h2 className={`text-3xl font-black uppercase mb-1 tracking-tighter print:${themeColor} ${themeColor}`}>{docType}</h2>
                             <p className="text-sm font-bold text-slate-500 mb-3">Réf: {data.id}</p>
                             
                             <div className="bg-slate-100 border border-slate-200 rounded-lg p-2 px-4 inline-block text-right print:bg-slate-100">
@@ -95,7 +107,7 @@ export const InternalDeliveryNote: React.FC<Props> = ({ data, onClose }) => {
                     {/* CLIENT INFO */}
                     <div className="flex justify-end mb-8">
                         <div className="w-1/2 bg-slate-50 border border-slate-200 rounded-xl p-5 print:bg-slate-50 print:border-slate-300">
-                            <p className="text-[10px] font-bold text-slate-400 uppercase mb-1 flex items-center gap-2">
+                            <p className="text-[10px] font-bold text-emerald-700 uppercase mb-1 flex items-center gap-2 print:text-emerald-700">
                                 {data.isReturn ? <ArrowLeftRight size={12}/> : <FileText size={12}/>} 
                                 {data.isReturn ? 'Client (Expéditeur)' : 'Client (Destinataire)'}
                             </p>
@@ -107,11 +119,11 @@ export const InternalDeliveryNote: React.FC<Props> = ({ data, onClose }) => {
                     <div className="flex-1">
                         <table className="w-full text-sm border-collapse">
                             <thead>
-                                <tr className="bg-slate-900 text-white uppercase text-[10px] tracking-wider print:bg-slate-900 print:text-white">
-                                    <th className="p-3 text-left rounded-tl-lg">Description / Article</th>
+                                <tr className="bg-emerald-50/50 text-emerald-900 uppercase text-[10px] font-bold tracking-wider print:bg-emerald-50/50 border-y border-emerald-100">
+                                    <th className="p-3 text-left">Description / Article</th>
                                     <th className="p-3 text-center">Quantité</th>
                                     <th className="p-3 text-center">Unité</th>
-                                    <th className="p-3 text-right rounded-tr-lg">Montant Total</th>
+                                    <th className="p-3 text-right">Montant Total</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-200">
@@ -121,7 +133,8 @@ export const InternalDeliveryNote: React.FC<Props> = ({ data, onClose }) => {
                                         <div className="text-[10px] text-slate-500 font-mono mt-0.5 flex items-center gap-1"><Package size={10}/> Réf: {data.sku}</div>
                                     </td>
                                     <td className="p-4 text-center font-bold text-lg">{data.quantity}</td>
-                                    <td className="p-4 text-center text-slate-500 text-[10px] font-bold uppercase">{data.measureUnit}</td>
+                                    {/* 🛑 FIX: Properly formats unit from data layer */}
+                                    <td className="p-4 text-center text-slate-500 text-[10px] font-bold uppercase">{getUnitLabel(data.measureUnit)}</td>
                                     <td className="p-4 text-right font-bold text-slate-900">{formatMAD(data.total)}</td>
                                 </tr>
                             </tbody>
@@ -145,11 +158,11 @@ export const InternalDeliveryNote: React.FC<Props> = ({ data, onClose }) => {
                                 </div>
                             </div>
 
-                            {/* TOTAL BLOCK (CLEANED - NO DEBT INFO) */}
+                            {/* TOTAL BLOCK */}
                             <div className="w-5/12">
                                 <div className="flex justify-between items-center py-2 bg-slate-100 px-3 rounded-lg print:bg-slate-100">
-                                    <span className={`font-bold text-xs uppercase ${themeColor}`}>{totalLabel}</span>
-                                    <span className={`font-black text-2xl ${themeColor}`}>{formatMAD(data.total)}</span>
+                                    <span className={`font-bold text-xs uppercase print:${themeColor} ${themeColor}`}>{totalLabel}</span>
+                                    <span className={`font-black text-2xl print:${themeColor} ${themeColor}`}>{formatMAD(data.total)}</span>
                                 </div>
                                 <p className="text-[9px] text-slate-400 mt-1 text-right px-1">
                                     {subLabel}
@@ -170,7 +183,7 @@ export const InternalDeliveryNote: React.FC<Props> = ({ data, onClose }) => {
 
                         {/* LEGAL FOOTER */}
                         <div className="mt-6 text-center border-t border-slate-100 pt-4">
-                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">ISSLI PECHE S.A.R.L - Gestion de Stock Magasin</p>
+                            <p className="text-[10px] text-emerald-800 font-bold uppercase tracking-wider print:text-emerald-800">ISSLI PECHE S.A.R.L - Gestion de Stock Magasin</p>
                             <p className="text-[8px] text-slate-400 mt-1">Ce document est généré électroniquement et sert de preuve de mouvement de marchandise.</p>
                         </div>
                     </div>

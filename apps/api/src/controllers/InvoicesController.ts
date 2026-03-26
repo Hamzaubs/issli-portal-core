@@ -6,13 +6,20 @@ import { Prisma } from '@prisma/client-legal';
 // Helper for Big Data Math
 const toDec = (val: any) => new Prisma.Decimal(val || 0);
 
+// 🛡️ MATH ENGINE: Strict Centimes for Status Checks to prevent drift
+const toCents = (n: any): number => {
+    if (!n) return 0;
+    const floatVal = typeof n === 'object' && 'toNumber' in n ? n.toNumber() : Number(n);
+    return Math.round(floatVal * 100);
+};
+
 // 🧠 LOGIC: Determine the Human-Readable Payment Mode + REFERENCE
 const computePaymentMode = (doc: any) => {
     // 1. If Cancelled
     if (doc.status === 'ANNULEE' || doc.status === 'CANCELLED') return 'ANNULÉ';
     if (doc.status === 'AVOIR_EMIS') return 'ANNULÉ (AVOIR)';
-    if (doc.status === 'AVOIR_PARTIEL') return `AVOIR PARTIEL`; // NEW
-    if (doc.type === 'AVOIR') return 'AVOIR (REMBOURSÉ)'; // Updated to reflect auto-refund
+    if (doc.status === 'AVOIR_PARTIEL') return `AVOIR PARTIEL`; 
+    if (doc.type === 'AVOIR') return 'AVOIR (REMBOURSÉ)'; 
 
     // 2. If Payments Exist (Paid or Partial)
     if (doc.payments && doc.payments.length > 0) {
@@ -116,7 +123,6 @@ export const InvoicesController = {
 
   createDocument: async (req: Request, res: Response) => {
     try {
-      // ✅ Added legacyReference and issuedAt
       const { type, clientId, items, note, isCredit, initialPayment, paymentMethod, paymentRef, legacyReference, issuedAt } = req.body;
       
       if (!clientId) return res.status(400).json({ error: "Client obligatoire" });
@@ -139,7 +145,6 @@ export const InvoicesController = {
 
               let purchaseCostSnapshot = new Prisma.Decimal(0);
 
-              // 🛡️ Handles normal items AND Ghost Items (null productId)
               if (item.productId) { 
                   const product = await tx.productA.findUnique({ where: { id: item.productId } });
                   if (!product) throw new Error(`Produit introuvable: ID ${item.productId}`);
@@ -180,11 +185,9 @@ export const InvoicesController = {
 
           let ref = '';
           if (type === 'FACTURE') {
-              // 🛡️ DGI COMPLIANCE: Separate sequence for imported legacy debts
               const isLegacyDebt = legacyReference || (note && note.includes('[REPRISE DE DETTE]'));
               
               if (isLegacyDebt) {
-                  // Use a distinct virtual year to never clash with real sales
                   const repYear = year + 10000; 
                   const seq = await tx.invoiceSequence.upsert({ 
                       where: { year: repYear }, 
@@ -193,7 +196,6 @@ export const InvoicesController = {
                   });
                   ref = `REP-${year}-${seq.lastCount.toString().padStart(4, '0')}`;
               } else {
-                  // Standard Invoice Logic
                   const seq = await tx.invoiceSequence.upsert({ 
                       where: { year }, 
                       update: { lastCount: { increment: 1 } }, 
@@ -211,9 +213,17 @@ export const InvoicesController = {
              ref = `DOC-${Date.now()}`;
           }
 
+          // 🛑 FIX: STRICT STATE MACHINE CALCULATION
           let status = 'EN_ATTENTE';
-          if (type === 'AVOIR') status = 'PAYEE'; 
-          if (type === 'FACTURE' && Number(initialPayment) >= totalTTC.toNumber()) status = 'PAYEE';
+          if (type === 'AVOIR') {
+              status = 'PAYEE'; 
+          } else if (type === 'FACTURE') {
+              const totalCents = toCents(totalTTC);
+              const paidCents = isCredit ? toCents(initialPayment) : totalCents;
+              
+              if (paidCents >= totalCents - 1) status = 'PAYEE';
+              else if (paidCents > 0) status = 'PARTIEL';
+          }
 
           let finalNote = note || '';
           if (type === 'FACTURE' && paymentMethod === 'LIVRAISON' && Number(initialPayment) === 0) {
@@ -225,14 +235,14 @@ export const InvoicesController = {
           const invoice = await tx.invoice.create({
               data: {
                   reference: ref, type, status, clientId,
-                  legacyReference: legacyReference || null, // ✅ Saved for audits
+                  legacyReference: legacyReference || null,
                   clientNameSnapshot: clientData.name,
                   clientIceSnapshot: clientData.ice,
                   clientAddressSnapshot: clientData.address,
                   totalHT, totalTTC,
                   amountPaid: amountPaid, 
                   note: finalNote.trim(),
-                  issuedAt: invoiceDate, // ✅ Uses the backdate to protect analytics
+                  issuedAt: invoiceDate,
                   items: { create: lineItems }
               },
               include: { items: true, client: true }
@@ -248,7 +258,7 @@ export const InvoicesController = {
                           method: paymentMethod || 'ESPECES',
                           reference: paymentRef,
                           note: isCredit ? 'Acompte initial' : 'Paiement Comptant',
-                          paidAt: invoiceDate // ✅ Backdate the payment too!
+                          paidAt: invoiceDate
                       }
                   });
               }
@@ -261,7 +271,7 @@ export const InvoicesController = {
                       method: paymentMethod || 'ESPECES',
                       reference: paymentRef || 'Remboursement',
                       note: 'Remboursement Immédiat (Auto)',
-                      paidAt: invoiceDate // ✅ Backdate
+                      paidAt: invoiceDate 
                   }
               });
           }
@@ -274,13 +284,10 @@ export const InvoicesController = {
     }
   },
 
-  // =========================================================================
-  // 3. CANCEL INVOICE (UPGRADED FOR AUTO-REFUNDS)
-  // =========================================================================
   cancelInvoice: async (req: Request, res: Response) => {
       try {
         const { id } = req.params;
-        const { partialReturns } = req.body; // Expects array of { id, returnQty }
+        const { partialReturns } = req.body; 
 
         const result = await prismaLegal.$transaction(async (tx) => {
             const invoice = await tx.invoice.findUnique({ where: { id }, include: { items: true } });
@@ -292,7 +299,6 @@ export const InvoicesController = {
             const seq = await tx.invoiceSequence.upsert({ where: { year: 9999 }, update: { lastCount: { increment: 1 } }, create: { year: 9999, lastCount: 1 } });
             const creditRef = `AVR-${year}-${seq.lastCount.toString().padStart(4, '0')}`;
 
-            // ✅ IF PARTIAL AVOIR IS REQUESTED
             if (partialReturns && Array.isArray(partialReturns) && partialReturns.length > 0) {
                 let totalHT = new Prisma.Decimal(0);
                 let totalTTC = new Prisma.Decimal(0);
@@ -317,7 +323,6 @@ export const InvoicesController = {
                         measureUnit: originalItem.measureUnit, unitPurchaseCostSnapshot: originalItem.unitPurchaseCostSnapshot
                     });
 
-                    // Restore Legal Stock
                     if (originalItem.productId) {
                         await tx.productA.update({ where: { id: originalItem.productId }, data: { quantity: { increment: qtyToReturn } } });
                     }
@@ -329,12 +334,11 @@ export const InvoicesController = {
                     data: {
                         reference: creditRef, type: 'AVOIR', status: 'PAYEE', clientId: invoice.clientId, 
                         clientNameSnapshot: invoice.clientNameSnapshot, totalHT, totalTTC, 
-                        amountPaid: totalTTC, // 🛑 Set fully paid instantly
+                        amountPaid: totalTTC, 
                         note: `Avoir partiel sur Facture ${invoice.reference}`, items: { create: creditLines }
                     }
                 });
 
-                // 🛑 NEW: Auto-Refund Payment for Partial
                 await tx.payment.create({
                     data: {
                         invoiceId: creditNote.id,
@@ -357,7 +361,6 @@ export const InvoicesController = {
                 return creditNote;
             } 
             
-            // ✅ IF FULL AVOIR IS REQUESTED (Legacy fallback)
             else {
                 await tx.invoice.update({ where: { id }, data: { status: 'AVOIR_EMIS', note: `Avoir total généré: ${creditRef}` } });
 
@@ -365,7 +368,7 @@ export const InvoicesController = {
                     data: {
                         reference: creditRef, type: 'AVOIR', status: 'PAYEE', clientId: invoice.clientId, 
                         clientNameSnapshot: invoice.clientNameSnapshot, totalHT: invoice.totalHT, totalTTC: invoice.totalTTC, 
-                        amountPaid: invoice.totalTTC, // 🛑 Set fully paid instantly
+                        amountPaid: invoice.totalTTC, 
                         note: `Annulation totale Facture ${invoice.reference}`,
                         items: {
                             create: invoice.items.map(item => ({
@@ -377,7 +380,6 @@ export const InvoicesController = {
                     }
                 });
 
-                // 🛑 NEW: Auto-Refund Payment for Full Cancel
                 await tx.payment.create({
                     data: {
                         invoiceId: creditNote.id,
@@ -387,7 +389,6 @@ export const InvoicesController = {
                     }
                 });
 
-                // Restore all Legal Stock
                 for (const item of invoice.items) {
                     if (item.productId) await tx.productA.update({ where: { id: item.productId }, data: { quantity: { increment: item.quantity } } });
                 }
@@ -398,7 +399,6 @@ export const InvoicesController = {
       } catch (error: any) { res.status(400).json({ error: error.message }); }
   },
 
-  // 🛡️ YOUR ORIGINAL FUNCTIONS RESTORED
   processLegacyExchange: async (req: Request, res: Response) => {
     try {
         const { clientId, returnedItems, newItems, legacyRef } = req.body;
@@ -414,7 +414,6 @@ export const InvoicesController = {
             let creditTotalTTC = new Prisma.Decimal(0);
             const creditLines = [];
             
-            // 1. PROCESS RETURNED LEGACY ITEMS
             for (const item of returnedItems) {
                 const price = toDec(item.priceHT);
                 const qty = toDec(item.quantity);
@@ -460,21 +459,18 @@ export const InvoicesController = {
             const seqAvoir = await tx.invoiceSequence.upsert({ where: { year: 9999 }, update: { lastCount: { increment: 1 } }, create: { year: 9999, lastCount: 1 } });
             const creditRef = `AVR-${year}-${seqAvoir.lastCount.toString().padStart(4, '0')}`;
 
-            // 2. CREATE AVOIR (🛑 FIX: Added amountPaid to instantly settle it)
             const creditNote = await tx.invoice.create({
                 data: {
                     reference: creditRef, legacyReference: legacyRef, type: 'AVOIR', status: 'PAYEE',
                     clientId, clientNameSnapshot: clientData.name, totalHT: creditTotalHT, totalTTC: creditTotalTTC,
-                    amountPaid: creditTotalTTC, // <--- CRITICAL FIX FOR NEW LEDGER
+                    amountPaid: creditTotalTTC, 
                     note: `Retour Marchandise Legacy (Ref: ${legacyRef || 'Inconnue'})`,
                     items: { create: creditLines }
                 }
             });
 
-            // If no new items are taken, they just keep the Avoir credit
             if (!newItems || newItems.length === 0) return { creditNote, invoice: null, balance: creditTotalTTC.neg() };
 
-            // 3. PROCESS NEW SALE ITEMS
             let saleTotalHT = new Prisma.Decimal(0);
             let saleTotalTTC = new Prisma.Decimal(0);
             const saleLines = [];
@@ -502,15 +498,21 @@ export const InvoicesController = {
             const seqFac = await tx.invoiceSequence.upsert({ where: { year }, update: { lastCount: { increment: 1 } }, create: { year, lastCount: 1 } });
             const invoiceRef = `FAC-${year}-${seqFac.lastCount.toString().padStart(4, '0')}`;
 
-            // 4. COMPENSATION MATH
             const balanceToPay = saleTotalTTC.sub(creditTotalTTC);
             const isFullyCovered = balanceToPay.lte(0);
             const amountCoveredByCredit = isFullyCovered ? saleTotalTTC : creditTotalTTC;
 
-            // 5. CREATE NEW INVOICE
+            // 🛑 FIX: STRICT STATE MACHINE FOR EXCHANGES
+            const totalCents = toCents(saleTotalTTC);
+            const coveredCents = toCents(amountCoveredByCredit);
+            
+            let exchangeStatus = 'EN_ATTENTE';
+            if (coveredCents >= totalCents - 1) exchangeStatus = 'PAYEE';
+            else if (coveredCents > 0) exchangeStatus = 'PARTIEL';
+
             const invoice = await tx.invoice.create({
                 data: {
-                    reference: invoiceRef, type: 'FACTURE', status: isFullyCovered ? 'PAYEE' : 'EN_ATTENTE',
+                    reference: invoiceRef, type: 'FACTURE', status: exchangeStatus,
                     clientId, clientNameSnapshot: clientData.name, totalHT: saleTotalHT, totalTTC: saleTotalTTC,
                     amountPaid: amountCoveredByCredit, 
                     note: `Echange contre Avoir ${creditRef}`,
@@ -518,7 +520,6 @@ export const InvoicesController = {
                 }
             });
 
-            // 6. APPLY COMPENSATION (🛑 FIX: Enforced 'COMPENSATION' tag for clean analytics)
             if (amountCoveredByCredit.gt(0)) {
                 await tx.payment.create({
                     data: {
@@ -567,7 +568,16 @@ export const InvoicesController = {
                     invoiceId: id, amount: toDec(amount), method: method || 'ESPECES', note
                 }
             });
-            const newStatus = newTotalPaid.gte(totalTTC.minus(0.5)) ? 'PAYEE' : 'EN_ATTENTE';
+
+            // 🛑 FIX: STRICT STATE MACHINE CALCULATION TO FIX FLOATING BUG
+            const totalCents = toCents(totalTTC);
+            const paidCents = toCents(newTotalPaid);
+            
+            let newStatus = invoice.status;
+            if (paidCents >= totalCents - 1) newStatus = 'PAYEE';
+            else if (paidCents > 0) newStatus = 'PARTIEL';
+            else newStatus = 'EN_ATTENTE';
+
             await tx.invoice.update({ where: { id }, data: { amountPaid: newTotalPaid, status: newStatus } });
             return { success: true, newStatus };
         });

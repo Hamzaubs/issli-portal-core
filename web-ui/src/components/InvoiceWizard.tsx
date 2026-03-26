@@ -86,13 +86,11 @@ export const InvoiceWizard: React.FC<Props> = ({ mode, onCancel, onSuccess }) =>
     useEffect(() => {
         const load = async () => {
             try {
-                // To fetch ALL clients for the dropdown (Limit 1000 protects memory)
                 const [c, p] = await Promise.all([
                     client.get('/legal/clients?limit=1000'), 
                     client.get('/legal/products')
                 ]);
                 
-                // ✅ FIX: Extracts the 'data' array safely based on the API response structure
                 setClients(Array.isArray(c.data) ? c.data : c.data?.data || []);
                 setProducts(Array.isArray(p.data) ? p.data : p.data?.data || []);
                 
@@ -120,7 +118,8 @@ export const InvoiceWizard: React.FC<Props> = ({ mode, onCancel, onSuccess }) =>
             priceHT: safeFloat(customItemPrice),
             quantity: 1, 
             vatRate: safeFloat(customItemVat), 
-            isCustom: true 
+            isCustom: true,
+            measureUnit: 'UNIT' // Default for custom items
         };
         setCart([...cart, newItem]);
         setCustomItemName(''); setCustomItemPrice(''); setCustomItemVat('0.20'); setShowCustomItemForm(false);
@@ -130,7 +129,6 @@ export const InvoiceWizard: React.FC<Props> = ({ mode, onCancel, onSuccess }) =>
         setCart(cart.map(item => { if (item.id === id) return { ...item, quantity: Math.max(0.01, item.quantity + delta) }; return item; }));
     };
 
-    // ✅ NEW: Direct Decimal Input Handler
     const setQuantity = (id: string, val: number) => {
         setCart(cart.map(item => { if (item.id === id) return { ...item, quantity: val }; return item; }));
     };
@@ -168,7 +166,8 @@ export const InvoiceWizard: React.FC<Props> = ({ mode, onCancel, onSuccess }) =>
                     productName: item.name, 
                     quantity: safeFloat(item.quantity), 
                     unitPrice: safeFloat(item.priceHT), 
-                    vatRate: safeFloat(item.vatRate)
+                    vatRate: safeFloat(item.vatRate),
+                    measureUnit: item.measureUnit || 'UNIT' // 🛑 FIX: Explicitly send measureUnit to backend!
                 })),
                 note: note,
                 isCredit: mode === 'INVOICE' && paymentMode === 'CREDIT',
@@ -188,6 +187,9 @@ export const InvoiceWizard: React.FC<Props> = ({ mode, onCancel, onSuccess }) =>
     const filteredClients = clients.filter(c => c.name?.toLowerCase().includes(searchTerm.toLowerCase()));
     const filteredProducts = products.filter(p => p.name?.toLowerCase().includes(searchTerm.toLowerCase()));
     const getInitials = (name: string) => (name || '??').substring(0, 2).toUpperCase();
+
+    // UI Helper to show unit in cart
+    const getUnitLabel = (unit?: string) => { switch(unit) { case 'M': return 'm'; case 'KG': return 'kg'; case 'L': return 'L'; case 'UNIT': default: return 'u'; } };
 
     return (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
@@ -271,7 +273,7 @@ export const InvoiceWizard: React.FC<Props> = ({ mode, onCancel, onSuccess }) =>
                             <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
                                 {!showCustomItemForm && filteredProducts.map(p => (
                                     <button key={p.id} onClick={() => addToCart(p)} className={`w-full flex justify-between items-center p-3.5 border border-slate-100 rounded-xl hover:${theme.border} hover:${theme.bgLight} hover:shadow-sm transition-all group bg-white`}>
-                                        <div className="text-left"><div className={`font-bold text-slate-800 text-sm group-hover:${theme.textDark}`}>{p.name}</div><div className="text-[11px] font-medium text-slate-400 mt-0.5">Stock: {p.quantity}</div></div>
+                                        <div className="text-left"><div className={`font-bold text-slate-800 text-sm group-hover:${theme.textDark}`}>{p.name}</div><div className="text-[11px] font-medium text-slate-400 mt-0.5">Stock: {p.quantity} {getUnitLabel(p.measureUnit)}</div></div>
                                         <div className={`font-mono font-bold text-slate-700 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 group-hover:bg-white group-hover:${theme.border} group-hover:${theme.textMain}`}>{formatMoney(p.priceHT)} MAD</div>
                                     </button>
                                 ))}
@@ -293,16 +295,18 @@ export const InvoiceWizard: React.FC<Props> = ({ mode, onCancel, onSuccess }) =>
                                         <button onClick={() => removeFromCart(item.id)} className="absolute top-2 right-2 text-slate-300 hover:text-red-500"><Trash2 size={14}/></button>
                                         <div className="font-bold text-sm text-slate-800 pr-6">{item.name}</div>
                                         <div className="flex justify-between items-center mt-2">
-                                            {/* ✅ FIX: EDITABLE DECIMAL QUANTITY */}
                                             <div className="flex items-center gap-1 bg-slate-100 rounded p-1">
                                                 <button onClick={() => updateQuantity(item.id, -1)} className="w-6 h-6 bg-white rounded shadow-sm text-xs font-bold">-</button>
-                                                <input 
-                                                    type="number" 
-                                                    step="0.01"
-                                                    className="w-12 text-center bg-transparent text-xs font-bold outline-none"
-                                                    value={item.quantity}
-                                                    onChange={(e) => setQuantity(item.id, parseFloat(e.target.value) || 0)}
-                                                />
+                                                <div className="flex items-center">
+                                                    <input 
+                                                        type="number" 
+                                                        step="0.01"
+                                                        className="w-12 text-center bg-transparent text-xs font-bold outline-none"
+                                                        value={item.quantity}
+                                                        onChange={(e) => setQuantity(item.id, parseFloat(e.target.value) || 0)}
+                                                    />
+                                                    <span className="text-[9px] font-bold text-slate-400 pr-1">{getUnitLabel(item.measureUnit)}</span>
+                                                </div>
                                                 <button onClick={() => updateQuantity(item.id, 1)} className="w-6 h-6 bg-white rounded shadow-sm text-xs font-bold">+</button>
                                             </div>
                                             
