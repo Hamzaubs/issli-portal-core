@@ -8,7 +8,6 @@
     "forceConsistentCasingInFileNames": true,
     "strict": true,
     "skipLibCheck": true,
-    "baseUrl": ".",
     "paths": {
       "@marine/db-internal": ["../../packages/db-internal/src/index.ts"],
       "@marine/db-legal": ["../../packages/db-legal/src/index.ts"],

@@ -24,6 +24,10 @@ interface Invoice {
 }
 
 export const LegalDashboard = () => {
+    // 🛡️ RBAC: Security Check
+    const currentUser = JSON.parse(localStorage.getItem('marine_user') || '{}');
+    const isAdmin = currentUser.role === 'SUPER_ADMIN';
+
     const navigate = useNavigate(); 
     const [activeTab, setActiveTab] = useState<'invoices' | 'assets'>('invoices');
     const [statusFilter, setStatusFilter] = useState<'ALL' | 'UNPAID' | 'QUOTES' | 'PAID'>('ALL');
@@ -48,24 +52,21 @@ export const LegalDashboard = () => {
     
     const [stockRefreshTrigger, setStockRefreshTrigger] = useState(0);
 
-    // --- 1. Debounce Search ---
     useEffect(() => {
         const timer = setTimeout(() => { setDebouncedSearch(searchTerm); setPagination(prev => ({ ...prev, page: 1 })); }, 500);
         return () => clearTimeout(timer);
     }, [searchTerm]);
 
-    // --- 2. Fetch Data ---
     const fetchData = async () => {
         try {
-            // Only fetch documents if in invoices tab or dashboard view
             if (activeTab === 'invoices') {
                 const res = await client.get(`/legal/documents?page=${pagination.page}&limit=10&search=${debouncedSearch}`);
                 if (res.data && Array.isArray(res.data.data)) {
                     setInvoices(res.data.data);
                     setPagination(prev => ({ ...prev, ...res.data.meta }));
                 }
-                const statRes = await client.get('/legal/stats');
-                setStats(statRes.data);
+               const statRes = await client.get('/legal/stats');
+               setStats(statRes.data.kpi || { revenueToday: 0, totalDebt: 0, quotesVolume: 0 });
             }
         } catch (error) { console.error(error); } 
     };
@@ -74,7 +75,6 @@ export const LegalDashboard = () => {
         if (viewMode === 'DASHBOARD') fetchData(); 
     }, [viewMode, pagination.page, debouncedSearch, activeTab]);
     
-    // --- 3. Filter Logic ---
     const filteredInvoices = invoices.filter(inv => {
         if (statusFilter === 'ALL') return true;
         if (statusFilter === 'QUOTES') return inv.type === 'DEVIS';
@@ -83,7 +83,6 @@ export const LegalDashboard = () => {
         return true;
     });
 
-    // --- 4. Actions ---
     const handleCancel = async (id: string) => {
         if (!window.confirm("⚠️ ATTENTION : Annuler cette vente ?")) return;
         try { 
@@ -93,26 +92,34 @@ export const LegalDashboard = () => {
         } catch (err: any) { alert("Erreur: " + err.response?.data?.error); }
     };
 
-    const handleAddPayment = async () => {
+   const handleAddPayment = async () => {
         if (!paymentModalData || !paymentAmount) return;
+        const amountNum = parseFloat(paymentAmount);
+        
+        if (amountNum <= 0) {
+            return alert("Le montant doit être supérieur à 0 MAD.");
+        }
+        if (amountNum > paymentModalData.remaining + 0.05) {
+            return alert(`⚠️ BLOQUÉ : Impossible de payer plus que le reste à payer (${formatMAD(paymentModalData.remaining)}).`);
+        }
+
         try {
             await client.post(`/legal/invoices/${paymentModalData.id}/payment`, {
-                amount: parseFloat(paymentAmount), method: 'ESPECES', note: 'Réglement depuis dashboard'
+                amount: amountNum, method: 'ESPECES', note: 'Réglement depuis dashboard'
             });
             setPaymentModalData(null); setPaymentAmount('');
             fetchData();
-        } catch (err: any) { alert("Erreur: " + err.response?.data?.error); }
+        } catch (err: any) { 
+            alert("Erreur Serveur: " + err.response?.data?.error); 
+        }
     };
 
     const formatMAD = (n: any) => new Intl.NumberFormat('fr-MA', { style: 'currency', currency: 'MAD', maximumFractionDigits: 2 }).format(Number(n));
 
-    // --- 5. Conditional Views ---
     if (viewMode === 'ANALYTICS') return <LegalAnalytics onBack={() => setViewMode('DASHBOARD')} />;
 
     return (
         <div className="p-8 max-w-[1600px] mx-auto min-h-screen bg-slate-50/50 relative">
-            
-            {/* HEADER BAR */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
                 <div>
                     <h1 className="text-2xl font-black text-slate-900 flex items-center gap-3">
@@ -126,13 +133,17 @@ export const LegalDashboard = () => {
                 
                 <div className="flex gap-3 relative z-10">
                     <button onClick={() => setShowSettings(true)} className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl"><Settings size={20} /></button>
-                    
                     <button onClick={() => setViewMode('ANALYTICS')} className="flex items-center gap-2 px-4 py-2 bg-indigo-50 border border-indigo-200 text-indigo-700 font-bold rounded-xl hover:bg-indigo-100"><FileBarChart size={18} /> Analytique</button>
                     
                     {activeTab === 'assets' ? (
                          <>
-                            <button onClick={() => setShowImportModal(true)} className="flex items-center gap-2 px-5 py-2 bg-white border border-slate-200 text-slate-600 font-bold rounded-xl hover:bg-slate-50">Import Excel</button>
-                            <button onClick={() => setShowAssetForm(true)} className="flex items-center gap-2 px-5 py-2 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-200 active:scale-95"><Package size={20} /> Nouveau Produit (A)</button>
+                            {/* 🛡️ RBAC: Hide Import and Add from non-admins */}
+                            {isAdmin && (
+                                <>
+                                    <button onClick={() => setShowImportModal(true)} className="flex items-center gap-2 px-5 py-2 bg-white border border-slate-200 text-slate-600 font-bold rounded-xl hover:bg-slate-50">Import Excel</button>
+                                    <button onClick={() => setShowAssetForm(true)} className="flex items-center gap-2 px-5 py-2 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-200 active:scale-95"><Package size={20} /> Nouveau Produit (A)</button>
+                                </>
+                            )}
                          </>
                     ) : (
                         <>
@@ -161,7 +172,6 @@ export const LegalDashboard = () => {
                 </div>
             </div>
 
-            {/* KPI CARDS (Only visible in Invoices Tab) */}
             {activeTab === 'invoices' && (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
                     <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
@@ -190,10 +200,8 @@ export const LegalDashboard = () => {
                 </div>
             )}
 
-            {/* MAIN CONTENT AREA */}
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden min-h-[500px] flex flex-col">
                 
-                {/* TABS & FILTERS */}
                 <div className="border-b border-slate-100 p-4 flex flex-col lg:flex-row justify-between items-center gap-4">
                     <div className="flex bg-slate-100 p-1 rounded-lg">
                         <button onClick={() => setActiveTab('invoices')} className={`px-4 py-2 rounded-md text-sm font-bold transition-all ${activeTab === 'invoices' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>Historique Ventes</button>
@@ -215,7 +223,6 @@ export const LegalDashboard = () => {
                     </div>
                 </div>
 
-                {/* DATA TABLE */}
                 <div className="flex-1 overflow-auto">
                     {activeTab === 'assets' ? (
                         <StockTableLegal refreshTrigger={stockRefreshTrigger} /> 
@@ -228,7 +235,7 @@ export const LegalDashboard = () => {
                                         <th className="p-4">Date</th>
                                         <th className="p-4">Client</th>
                                         <th className="p-4 text-right">Montant TTC</th>
-                                        <th className="p-4">Statut</th>
+                                        <th className="p-4 text-center">Statut</th>
                                         <th className="p-4 text-right">Actions</th>
                                     </tr>
                                 </thead>
@@ -238,11 +245,11 @@ export const LegalDashboard = () => {
                                         const isUnpaid = remaining > 0.5;
                                         return (
                                             <tr key={inv.id} className="hover:bg-slate-50/80 transition-colors group">
-                                                <td className="p-4 font-mono font-bold text-slate-700">{inv.reference}</td>
+                                                <td className="p-4 font-mono font-bold text-blue-900">{inv.reference}</td>
                                                 <td className="p-4 text-slate-500">{new Date(inv.issuedAt).toLocaleDateString('fr-MA')}</td>
                                                 <td className="p-4 font-bold text-slate-800">{inv.client?.name}</td>
                                                 <td className="p-4 text-right font-bold text-slate-900">{formatMAD(inv.totalTTC)}</td>
-                                                <td className="p-4">
+                                                <td className="p-4 text-center">
                                                     {inv.status === 'AVOIR_EMIS' ? <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold bg-purple-100 text-purple-700"><Undo2 size={12}/> REMBOURSÉ</span>
                                                     : inv.type === 'AVOIR' ? <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600">AVOIR (Crédit)</span>
                                                     : isUnpaid && inv.type !== 'DEVIS' ? <div className="flex flex-col items-start"><span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold bg-orange-100 text-orange-700"><AlertCircle size={12}/> Reste: {formatMAD(remaining)}</span></div>
@@ -255,7 +262,8 @@ export const LegalDashboard = () => {
                                                         <button onClick={() => { setPaymentAmount(remaining.toString()); setPaymentModalData({ id: inv.id, ref: inv.reference, remaining }); }} 
                                                             className="p-2 hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 rounded-lg transition-colors"><Coins size={18} /></button>
                                                     )}
-                                                    {inv.type === 'FACTURE' && <button onClick={() => handleCancel(inv.id)} className="p-2 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded-lg"><Undo2 size={18} /></button>}
+                                                    {/* 🛡️ RBAC: Only Admin can cancel */}
+                                                    {isAdmin && inv.type === 'FACTURE' && <button onClick={() => handleCancel(inv.id)} className="p-2 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded-lg"><Undo2 size={18} /></button>}
                                                 </td>
                                             </tr>
                                         );
@@ -281,7 +289,7 @@ export const LegalDashboard = () => {
                     onCancel={() => setWizardMode('NONE')} 
                     onSuccess={() => { 
                         setWizardMode('NONE'); 
-                        fetchData(); // ✅ FIX: Instant Refresh after Sale
+                        fetchData(); 
                         setStockRefreshTrigger(p => p + 1); 
                     }} 
                 />
@@ -297,7 +305,7 @@ export const LegalDashboard = () => {
                     <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm">
                         <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg text-slate-800">Réglement</h3><button onClick={() => setPaymentModalData(null)}><X size={20} className="text-slate-400"/></button></div>
                         <div className="mb-4"><p className="text-sm text-slate-500">Reste: <span className="font-bold text-red-600">{formatMAD(paymentModalData.remaining)}</span></p></div>
-                        <div className="mb-6"><input autoFocus type="number" className="w-full pl-4 py-3 border border-slate-300 rounded-xl text-lg font-bold outline-none focus:ring-2 focus:ring-blue-500" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} /></div>
+                        <div className="mb-6"><input autoFocus type="number" max={paymentModalData.remaining} step="0.01" className="w-full pl-4 py-3 border border-slate-300 rounded-xl text-lg font-bold outline-none focus:ring-2 focus:ring-blue-500" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} /></div>
                         <button onClick={handleAddPayment} className="w-full bg-blue-600 text-white font-bold py-3 rounded-xl hover:bg-blue-700">Confirmer</button>
                     </div>
                 </div>

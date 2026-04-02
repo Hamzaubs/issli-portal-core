@@ -165,7 +165,7 @@ export const LegalDashboard = () => {
                                 onClick={() => setWizardMode('INVOICE')} 
                                 className="flex items-center gap-2 px-5 py-2 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-200 active:scale-95"
                             >
-                                <Plus size={20} /> Nouvelle Vente
+                                <Plus size={20} /> Nouvelle Facturation
                             </button>
                         </>
                     )}
