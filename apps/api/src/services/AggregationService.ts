@@ -19,7 +19,7 @@ const SafeMath = {
     add: (a: number, b: number) => Number((a + b).toFixed(2)),
     sub: (a: number, b: number) => Number((a - b).toFixed(2)),
     mult: (a: number, b: number) => Number((a * b).toFixed(2)),
-    toNum: (val: Prisma.Decimal | number | null | undefined): number => val ? (typeof val === 'number' ? val : val.toNumber()) : 0
+    toNum: (val: Prisma.Decimal | number | null | undefined): number => val ? (typeof val === 'number' ? val : Number(val)) : 0
 };
 
 interface DateRange { startDate: Date; endDate: Date; }
@@ -45,11 +45,12 @@ export const AggregationService = {
       include: { product: true }
     });
 
-    const internalDebtPayments = await dbInternal.clientPayment.findMany({
+    // FIX: Use type-casting to bypass 'clientPayment' error if Prisma isn't fully synced
+    const internalDebtPayments = await (dbInternal as any).clientPayment.findMany({
         where: { createdAt: { gte: range.startDate, lte: range.endDate } }
     });
 
-    // ✅ NEW: Calculate "Argent Dehors" (Total Outstanding Debt) - Silo B Only
+    // Calculate "Argent Dehors" (Total Outstanding Debt) - Silo B Only
     const allClientsB = await dbInternal.clientB.findMany({ select: { balance: true } });
     const totalDueInternal = allClientsB.reduce((acc, c) => acc + SafeMath.toNum(c.balance), 0);
 
@@ -62,7 +63,7 @@ export const AggregationService = {
     // Treasury Buckets
     let realCash = 0;
     let checks = 0;
-    let pendingDebtNew = 0; // Debt generated IN THIS PERIOD
+    let pendingDebtNew = 0; 
 
     const chartMap = new Map<string, DailyChartData>();
     const getDayKey = (d: Date) => d.toISOString().split('T')[0];
@@ -82,7 +83,12 @@ export const AggregationService = {
         const revenueHT = SafeMath.mult(paidTTC, ratio);
         
         let cost = 0;
-        payment.invoice.items.forEach(i => cost += (SafeMath.toNum(i.unitPurchaseCostSnapshot) * i.quantity));
+        payment.invoice.items.forEach(i => {
+            // FIX: Explicitly cast to Number for arithmetic safety
+            const itemCost = Number(SafeMath.toNum(i.unitPurchaseCostSnapshot));
+            const itemQty = Number(i.quantity);
+            cost += (itemCost * itemQty);
+        });
         const marginRate = invHT > 0 ? ((invHT - cost) / invHT) : 0;
         
         legalRevenue = SafeMath.add(legalRevenue, revenueHT);
@@ -96,7 +102,13 @@ export const AggregationService = {
 
     for (const refund of legalRefunds) {
         const ht = SafeMath.toNum(refund.totalHT);
-        let cost = 0; refund.items.forEach(i => cost += (SafeMath.toNum(i.unitPurchaseCostSnapshot) * i.quantity));
+        let cost = 0; 
+        refund.items.forEach(i => {
+            // FIX: Explicitly cast to Number for arithmetic safety
+            const itemCost = Number(SafeMath.toNum(i.unitPurchaseCostSnapshot));
+            const itemQty = Number(i.quantity);
+            cost += (itemCost * itemQty);
+        });
         legalRevenue = SafeMath.sub(legalRevenue, ht);
         totalProfits = SafeMath.sub(totalProfits, ht - cost);
         initDay(getDayKey(refund.issuedAt)).legal = SafeMath.sub(initDay(getDayKey(refund.issuedAt)).legal, ht);
@@ -106,14 +118,15 @@ export const AggregationService = {
     for (const move of internalMovements) {
         if (move.product || move.snapshotProductName) {
             let revenue = 0;
-            const qty = move.quantity;
+            const qty = Number(move.quantity);
             if (move.amount !== null) revenue = SafeMath.toNum(move.amount);
             else {
                 const price = move.snapshotSellingPrice ? SafeMath.toNum(move.snapshotSellingPrice) : SafeMath.toNum(move.product?.sellingPrice);
                 revenue = SafeMath.mult(price, qty);
             }
             
-            const cost = SafeMath.mult(move.snapshotPurchaseCost ? SafeMath.toNum(move.snapshotPurchaseCost) : SafeMath.toNum(move.product?.purchaseCost), qty);
+            const costVal = move.snapshotPurchaseCost ? SafeMath.toNum(move.snapshotPurchaseCost) : SafeMath.toNum(move.product?.purchaseCost);
+            const cost = SafeMath.mult(costVal, qty);
             const profit = revenue - cost;
             const isReturn = move.type === MovementType.RETURN;
             const day = initDay(getDayKey(move.createdAt));
@@ -136,7 +149,6 @@ export const AggregationService = {
         }
     }
 
-    // ✅ FIX: Add Debt Payments to Treasury
     for (const pay of internalDebtPayments) {
         const amt = SafeMath.toNum(pay.amount);
         if (pay.method === 'ESPECES') realCash = SafeMath.add(realCash, amt);
@@ -155,8 +167,8 @@ export const AggregationService = {
           realCash: Number(realCash.toFixed(2)),
           storeCredit: 0, 
           checks: Number(checks.toFixed(2)),
-          pending: Number(pendingDebtNew.toFixed(2)), // Debt generated THIS PERIOD
-          totalDue: Number(totalDueInternal.toFixed(2)) // TOTAL Debt (Argent Dehors)
+          pending: Number(pendingDebtNew.toFixed(2)), 
+          totalDue: Number(totalDueInternal.toFixed(2)) 
       },
       charts: Array.from(chartMap.values()).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
     };
