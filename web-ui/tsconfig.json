@@ -25,7 +25,6 @@
 
     /* Paths to find your DB packages */
     "baseUrl": ".",
-    "ignoreDeprecations": "6.0",
     "paths": {
       "@marine/db-internal": ["../../packages/db-internal/src/index.ts"],
       "@marine/db-legal": ["../../packages/db-legal/src/index.ts"]
