@@ -73,6 +73,53 @@ export const InternalController = {
   },
 
   // ====================================================
+  // 📥 BATCH IMPORT (SILO B)
+  // ====================================================
+  importBatchProducts: async (req: Request, res: Response) => {
+      try {
+          const { products } = req.body;
+          if (!products || !Array.isArray(products)) {
+              return res.status(400).json({ error: "Données invalides" });
+          }
+
+          let successCount = 0;
+          let errorCount = 0;
+          const errorDetails: string[] = [];
+
+          for (const item of products) {
+              try {
+                  await prismaInternal.productB.upsert({
+                      where: { internalSku: item.internalSku },
+                      update: {
+                          name: item.name,
+                          purchaseCost: safeDecimal(item.purchaseCost),
+                          sellingPrice: safeDecimal(item.sellingPrice),
+                          quantity: Number(item.quantity) || 0,
+                          measureUnit: item.measureUnit || 'UNIT',
+                      },
+                      create: {
+                          name: item.name,
+                          internalSku: item.internalSku,
+                          purchaseCost: safeDecimal(item.purchaseCost),
+                          sellingPrice: safeDecimal(item.sellingPrice),
+                          quantity: Number(item.quantity) || 0,
+                          measureUnit: item.measureUnit || 'UNIT',
+                      }
+                  });
+                  successCount++;
+              } catch (err: any) {
+                  errorCount++;
+                  errorDetails.push(`❌ Ligne ${item.internalSku}: ${err.message}`);
+              }
+          }
+
+          res.json({ success: successCount, errors: errorCount, errorDetails });
+      } catch (e: any) {
+          res.status(500).json({ error: "Erreur serveur lors de l'import." });
+      }
+  },
+
+  // ====================================================
   // 💰 2. TRANSACTION ENGINE (Atomic & Big Data Safe)
   // ====================================================
   

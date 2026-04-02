@@ -4,7 +4,7 @@ import {
   History, Pencil, Ruler, Weight, Droplets,
   ClipboardList, Box, LogOut, Grid, User,
   ChevronRight, FileText, PieChart, CreditCard, Truck, Banknote, Building2,
-  AlertCircle 
+  AlertCircle, FileSpreadsheet, Trash 
 } from 'lucide-react';
 
 import client from '../api/client';
@@ -14,13 +14,13 @@ import { ClientSelector } from './ClientSelector';
 import { ProductForm } from './ProductForm'; 
 import { InternalQuoteWizard } from './InternalQuoteWizard'; 
 import { ExecutiveDashboard } from './ExecutiveDashboard'; 
+import { InternalAssetImport } from './InternalAssetImport';
 
 interface ProductB {
   id: string; name: string; internalSku: string; purchaseCost: number; sellingPrice: number; quantity: number;
   measureUnit: string; technicalSpecs?: string;
 }
 
-// 🇫🇷 TRADUCTION DES MODES DE RÈGLEMENT
 const PAYMENT_LABELS: Record<string, string> = {
   'CASH': 'ESPÈCES',
   'CHECK': 'CHÈQUE',
@@ -57,6 +57,8 @@ export const Dashboard = ({ user }: { user?: any }) => {
   const [editingProduct, setEditingProduct] = useState<ProductB | null>(null);
   const [receiptData, setReceiptData] = useState<any | null>(null);
   const [statsData, setStatsData] = useState<any>(null);
+  
+  const [showImportModal, setShowImportModal] = useState(false);
 
   const getUnitLabel = (unit?: string) => { 
       switch(unit) { 
@@ -95,7 +97,8 @@ export const Dashboard = ({ user }: { user?: any }) => {
     if (returnMode) type = 'RETURN';
     if (paymentMethod === 'QUOTE') type = 'QUOTE';
 
-    if (type === 'SALE_CASH' && selectedProduct.quantity < transactionQty) {
+    const qtyNum = parseFloat(transactionQty.toString());
+    if (type === 'SALE_CASH' && selectedProduct.quantity < qtyNum) {
         alert(`❌ Stock Insuffisant !\nDisponible : ${selectedProduct.quantity} ${getUnitLabel(selectedProduct.measureUnit)}`);
         return;
     }
@@ -110,7 +113,7 @@ export const Dashboard = ({ user }: { user?: any }) => {
       await client.post('/internal/transactions', { 
           productId: selectedProduct.id, 
           userId: currentUser.id, 
-          quantity: transactionQty,
+          quantity: qtyNum,
           type,
           clientId: activeClient?.id,
           paymentMethod: type === 'QUOTE' ? undefined : paymentMethod,
@@ -121,12 +124,11 @@ export const Dashboard = ({ user }: { user?: any }) => {
       setRefresh(prev => prev + 1);
       setReceiptData({ 
           productName: selectedProduct.name, sku: selectedProduct.internalSku, 
-          quantity: transactionQty, unitPrice: selectedProduct.sellingPrice, 
-          total: selectedProduct.sellingPrice * transactionQty, 
+          quantity: qtyNum, unitPrice: selectedProduct.sellingPrice, 
+          total: selectedProduct.sellingPrice * qtyNum, 
           date: new Date(), id: 'TRX-' + Math.random().toString(36).substring(7).toUpperCase(),
           measureUnit: selectedProduct.measureUnit,
           clientName: activeClient?.name,
-          // ✅ ENVOIE LA TRADUCTION AU BON DE LIVRAISON
           paymentMethod: type === 'QUOTE' ? 'DEVIS' : PAYMENT_LABELS[paymentMethod], 
           paymentRef, 
           isReturn: returnMode,
@@ -202,8 +204,14 @@ export const Dashboard = ({ user }: { user?: any }) => {
 
                <button onClick={() => setHistoryMode(!historyMode)} className={`p-2.5 rounded-xl border-2 ${historyMode ? 'bg-slate-800 text-white' : 'bg-white text-slate-400 border-slate-200'}`}><History size={20} /></button>
                <button onClick={() => setReturnMode(!returnMode)} className={`px-4 py-2.5 rounded-xl font-bold text-xs border ${returnMode ? 'bg-red-600 text-white' : 'bg-white text-slate-600 border-slate-200'}`}>RETOUR</button>
-               {isAdmin && <button onClick={() => { setEditingProduct(null); setShowProductForm(true); }} className="p-2.5 bg-emerald-600 text-white rounded-xl"><Plus size={20} /></button>}
-               {isAdmin && <button onClick={() => setViewMode('EXECUTIVE')} className="p-2.5 bg-slate-900 text-white rounded-xl"><PieChart size={20} /></button>}
+               
+               {isAdmin && (
+                   <button onClick={() => setShowImportModal(true)} className="p-2.5 bg-emerald-100 text-emerald-700 rounded-xl hover:bg-emerald-200 transition-colors" title="Importer CSV">
+                       <FileSpreadsheet size={20} />
+                   </button>
+               )}
+               {isAdmin && <button onClick={() => { setEditingProduct(null); setShowProductForm(true); }} className="p-2.5 bg-emerald-600 text-white rounded-xl" title="Nouveau Produit"><Plus size={20} /></button>}
+               {isAdmin && <button onClick={() => setViewMode('EXECUTIVE')} className="p-2.5 bg-slate-900 text-white rounded-xl" title="Dashboard Analytique"><PieChart size={20} /></button>}
            </div>
         </div>
 
@@ -237,6 +245,33 @@ export const Dashboard = ({ user }: { user?: any }) => {
                 <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
                     <div className="text-center">
                         <h3 className="text-xl font-black text-slate-800">{selectedProduct.name}</h3>
+                        
+                        {isAdmin && (
+                            <div className="flex items-center justify-center gap-2 mt-3">
+                                <button 
+                                    onClick={() => { setEditingProduct(selectedProduct); setShowProductForm(true); }} 
+                                    className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-xs font-bold transition-colors"
+                                >
+                                    <Pencil size={14}/> Modifier
+                                </button>
+                                <button 
+                                    onClick={async () => {
+                                        if (!window.confirm(`Supprimer définitivement ${selectedProduct.name} ?`)) return;
+                                        try {
+                                            await client.delete(`/internal/products/${selectedProduct.id}`);
+                                            setRefresh(p => p + 1);
+                                            setSelectedProduct(null);
+                                        } catch (err: any) {
+                                            alert(err.response?.data?.error || "Erreur de suppression.");
+                                        }
+                                    }} 
+                                    className="flex items-center gap-1 px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg text-xs font-bold transition-colors"
+                                >
+                                    <Trash size={14}/> Supprimer
+                                </button>
+                            </div>
+                        )}
+
                         <div className="flex items-center justify-center gap-4 mt-6">
                             <button onClick={() => setTransactionQty(Math.max(1, transactionQty - 1))} className="w-12 h-12 bg-slate-100 rounded-xl font-black hover:bg-slate-200">-</button>
                             <div className="flex items-baseline">
@@ -260,7 +295,6 @@ export const Dashboard = ({ user }: { user?: any }) => {
                                       onClick={() => setPaymentMethod(m as any)} 
                                       className={`p-3 rounded-xl border-2 text-[10px] font-black uppercase tracking-wider ${paymentMethod === m ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-100 text-slate-600 hover:border-slate-300'}`}
                                     >
-                                        {/* ✅ AFFICHE LE NOM FRANÇAIS */}
                                         {PAYMENT_LABELS[m]}
                                     </button>
                                 ))}
@@ -296,6 +330,17 @@ export const Dashboard = ({ user }: { user?: any }) => {
       {showProductForm && <ProductForm initialData={editingProduct} onCancel={() => setShowProductForm(false)} onSuccess={() => { setShowProductForm(false); setRefresh(p => p+1); }} />}
       {receiptData && <InternalDeliveryNote data={receiptData} onClose={() => setReceiptData(null)} />}
       {showQuoteWizard && <InternalQuoteWizard onCancel={() => setShowQuoteWizard(false)} onSuccess={() => { setShowQuoteWizard(false); setRefresh(p => p+1); }} />}
+      
+      {showImportModal && (
+          <InternalAssetImport 
+              onCancel={() => setShowImportModal(false)}
+              onSuccess={() => {
+                  setShowImportModal(false);
+                  setRefresh(p => p + 1); 
+              }}
+          />
+      )}
+
     </div>
   );
 };

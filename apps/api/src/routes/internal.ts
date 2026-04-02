@@ -19,7 +19,7 @@ router.get('/products', InternalController.getProducts); // Anyone logged in can
 router.post('/products', requireAdmin, InternalController.createProduct); 
 router.put('/products/:id', requireAdmin, InternalController.updateProduct); 
 router.delete('/products/:id', requireAdmin, InternalController.deleteProduct); 
-
+router.post('/products/batch-import', requireAdmin, InternalController.importBatchProducts);
 // 📝 Inventory Bulk Adjustments
 router.post('/inventory/adjust', requireAdmin, InternalController.adjustInventoryBatch); // 🔒 ADMIN ONLY
 
