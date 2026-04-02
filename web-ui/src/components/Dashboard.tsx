@@ -1,11 +1,10 @@
-// web-ui/src/components/Dashboard.tsx
 import React, { useEffect, useState } from 'react';
 import { 
   Search, Plus, ShoppingCart, RotateCcw, Anchor, 
   History, Pencil, Ruler, Weight, Droplets,
   ClipboardList, Box, LogOut, Grid, User,
   ChevronRight, FileText, PieChart, CreditCard, Truck, Banknote, Building2,
-  AlertCircle // ✅ Added for the warning modal
+  AlertCircle 
 } from 'lucide-react';
 
 import client from '../api/client';
@@ -21,6 +20,15 @@ interface ProductB {
   measureUnit: string; technicalSpecs?: string;
 }
 
+// 🇫🇷 TRADUCTION DES MODES DE RÈGLEMENT
+const PAYMENT_LABELS: Record<string, string> = {
+  'CASH': 'ESPÈCES',
+  'CHECK': 'CHÈQUE',
+  'TRANSFER': 'VIREMENT',
+  'CREDIT': 'CRÉDIT',
+  'QUOTE': 'DEVIS'
+};
+
 export const Dashboard = ({ user }: { user?: any }) => {
   const currentUser = user || JSON.parse(localStorage.getItem('marine_user') || '{}');
   const isAdmin = currentUser.role === 'SUPER_ADMIN';
@@ -34,7 +42,6 @@ export const Dashboard = ({ user }: { user?: any }) => {
   const [historyMode, setHistoryMode] = useState(false);
   const [showQuoteWizard, setShowQuoteWizard] = useState(false); 
 
-  // 🛑 NEW: Anonymous Transaction Shield State
   const [showAnonymousConfirm, setShowAnonymousConfirm] = useState(false);
 
   const [selectedProduct, setSelectedProduct] = useState<ProductB | null>(null);
@@ -51,7 +58,6 @@ export const Dashboard = ({ user }: { user?: any }) => {
   const [receiptData, setReceiptData] = useState<any | null>(null);
   const [statsData, setStatsData] = useState<any>(null);
 
-  // ✅ Helper to format unit for display
   const getUnitLabel = (unit?: string) => { 
       switch(unit) { 
           case 'M': return 'm'; 
@@ -71,7 +77,6 @@ export const Dashboard = ({ user }: { user?: any }) => {
 
   const formatMAD = (amount: number) => new Intl.NumberFormat('fr-MA', { style: 'currency', currency: 'MAD' }).format(amount);
   
-  // ✅ Updated to accept a bypass parameter for the confirmation modal
   const handleTransaction = async (bypassConfirm: boolean = false) => {
     if (!selectedProduct) return;
     
@@ -95,10 +100,9 @@ export const Dashboard = ({ user }: { user?: any }) => {
         return;
     }
 
-    // 🛑 NEW: ANONYMOUS CHECKOUT SHIELD (Bypasses browser popup blockers using React DOM)
     if (!activeClient && (type === 'SALE_CASH' || type === 'RETURN') && !bypassConfirm) {
         setShowAnonymousConfirm(true);
-        return; // Halt execution and wait for user to click Continue on the modal
+        return; 
     }
 
     setSubmitting(true);
@@ -111,7 +115,7 @@ export const Dashboard = ({ user }: { user?: any }) => {
           clientId: activeClient?.id,
           paymentMethod: type === 'QUOTE' ? undefined : paymentMethod,
           paymentRef,
-          measureUnit: selectedProduct.measureUnit || 'UNIT' // 🛑 FIX: Inject measureUnit into Silo B payload
+          measureUnit: selectedProduct.measureUnit || 'UNIT' 
       });
       
       setRefresh(prev => prev + 1);
@@ -120,9 +124,10 @@ export const Dashboard = ({ user }: { user?: any }) => {
           quantity: transactionQty, unitPrice: selectedProduct.sellingPrice, 
           total: selectedProduct.sellingPrice * transactionQty, 
           date: new Date(), id: 'TRX-' + Math.random().toString(36).substring(7).toUpperCase(),
-          measureUnit: selectedProduct.measureUnit, // Ensure it goes to the printer
+          measureUnit: selectedProduct.measureUnit,
           clientName: activeClient?.name,
-          paymentMethod: type === 'QUOTE' ? 'DEVIS' : paymentMethod, 
+          // ✅ ENVOIE LA TRADUCTION AU BON DE LIVRAISON
+          paymentMethod: type === 'QUOTE' ? 'DEVIS' : PAYMENT_LABELS[paymentMethod], 
           paymentRef, 
           isReturn: returnMode,
           isQuote: type === 'QUOTE' 
@@ -148,7 +153,6 @@ export const Dashboard = ({ user }: { user?: any }) => {
   return (
     <div className="h-screen flex bg-slate-100 overflow-hidden relative">
       
-      {/* 🛑 CUSTOM CONFIRMATION MODAL OVERLAY */}
       {showAnonymousConfirm && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
               <div className="bg-white rounded-2xl p-8 max-w-sm w-full text-center shadow-2xl animate-in zoom-in-95 border-2 border-amber-400">
@@ -157,7 +161,7 @@ export const Dashboard = ({ user }: { user?: any }) => {
                   </div>
                   <h3 className="text-xl font-black text-slate-800 mb-2">Attention</h3>
                   <p className="text-sm text-slate-600 mb-8 font-medium leading-relaxed">
-                      Aucun client sélectionné. {returnMode ? 'Ce retour' : 'Cette vente'} sera enregistré(e) sous <br/><strong className="text-slate-800">'CLIENT COMPTOIR'</strong> (Anonyme).
+                      Aucun client sélectionné. {returnMode ? 'Ce retour' : 'Cette vente'} sera enregistré(e) sous <br/><strong className="text-slate-800">'CLIENT COMPTOIR'</strong>.
                       <br/><br/>
                       Voulez-vous vraiment continuer ?
                   </p>
@@ -211,7 +215,6 @@ export const Dashboard = ({ user }: { user?: any }) => {
                             <div className="flex justify-between items-start mb-2"><span className="text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded uppercase">{p.internalSku}</span></div>
                             <h3 className="font-bold text-slate-800 text-sm h-10 line-clamp-2">{p.name}</h3>
                             <div className="mt-4 flex justify-between items-end border-t pt-2">
-                                {/* ✅ DISPLAY UNIT NEXT TO STOCK */}
                                 <div><p className="text-[9px] text-slate-400 font-bold uppercase">Stock</p><p className={`text-sm font-black ${p.quantity < 5 ? 'text-red-500' : 'text-slate-700'}`}>{p.quantity} <span className="text-[10px] font-bold text-slate-400">{getUnitLabel(p.measureUnit)}</span></p></div>
                                 <div className="text-lg font-black text-emerald-600">{p.sellingPrice} <span className="text-[9px] text-slate-400">DH</span></div>
                             </div>
@@ -236,7 +239,6 @@ export const Dashboard = ({ user }: { user?: any }) => {
                         <h3 className="text-xl font-black text-slate-800">{selectedProduct.name}</h3>
                         <div className="flex items-center justify-center gap-4 mt-6">
                             <button onClick={() => setTransactionQty(Math.max(1, transactionQty - 1))} className="w-12 h-12 bg-slate-100 rounded-xl font-black hover:bg-slate-200">-</button>
-                            {/* ✅ DISPLAY UNIT NEXT TO QUANTITY INPUT */}
                             <div className="flex items-baseline">
                                 <span className="text-4xl font-black text-slate-900">{transactionQty}</span>
                                 <span className="text-xs font-bold text-slate-400 ml-1 pb-1">{getUnitLabel(selectedProduct.measureUnit)}</span>
@@ -253,8 +255,13 @@ export const Dashboard = ({ user }: { user?: any }) => {
                         <div className="space-y-2">
                             <div className="grid grid-cols-2 gap-2">
                                 {['CASH', 'CHECK', 'TRANSFER', 'CREDIT'].map((m) => (
-                                    <button key={m} onClick={() => setPaymentMethod(m as any)} className={`p-3 rounded-xl border-2 text-[10px] font-bold ${paymentMethod === m ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-100 text-slate-600 hover:border-slate-300'}`}>
-                                        {m}
+                                    <button 
+                                      key={m} 
+                                      onClick={() => setPaymentMethod(m as any)} 
+                                      className={`p-3 rounded-xl border-2 text-[10px] font-black uppercase tracking-wider ${paymentMethod === m ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-100 text-slate-600 hover:border-slate-300'}`}
+                                    >
+                                        {/* ✅ AFFICHE LE NOM FRANÇAIS */}
+                                        {PAYMENT_LABELS[m]}
                                     </button>
                                 ))}
                             </div>
@@ -278,7 +285,6 @@ export const Dashboard = ({ user }: { user?: any }) => {
           </div>
 
           <div className="p-6 border-t border-slate-200">
-              {/* ✅ Call handleTransaction() without args natively, modal triggers it with (true) */}
               <button onClick={() => handleTransaction(false)} disabled={!selectedProduct || submitting} 
                 className={`w-full py-4 text-white font-black rounded-2xl shadow-lg disabled:opacity-50 transition-colors ${returnMode ? 'bg-red-600 hover:bg-red-700' : paymentMethod === 'QUOTE' ? 'bg-amber-500 hover:bg-amber-600 text-slate-900' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
                   {submitting ? '...' : returnMode ? 'VALIDER RETOUR' : paymentMethod === 'QUOTE' ? 'GÉNÉRER DEVIS' : 'VALIDER TRANSACTION'}

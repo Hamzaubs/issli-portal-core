@@ -21,7 +21,6 @@ export const InternalDeliveryNote: React.FC<Props> = ({ data, onClose }) => {
     const formatMAD = (amount: number) => 
         new Intl.NumberFormat('fr-MA', { style: 'currency', currency: 'MAD' }).format(Math.abs(amount));
 
-    // 🛑 FIX: Unit formatting logic added
     const getUnitLabel = (unit?: string) => { 
         switch(unit) { 
             case 'M': return 'm'; 
@@ -31,7 +30,6 @@ export const InternalDeliveryNote: React.FC<Props> = ({ data, onClose }) => {
         } 
     };
 
-    // ✅ DYNAMIC DOCUMENT CONFIGURATION
     const docType = data.isQuote ? 'DEVIS' : data.isReturn ? 'BON DE RETOUR' : 'BON DE LIVRAISON';
     const totalLabel = data.isQuote ? 'Total Estimé' : data.isReturn ? 'Total Avoir (Crédit)' : 'Total Net à Payer';
     const subLabel = data.isQuote ? 'Proposition commerciale' : data.isReturn ? 'Montant à déduire ou rembourser' : 'Valeur de la marchandise livrée';
@@ -133,7 +131,6 @@ export const InternalDeliveryNote: React.FC<Props> = ({ data, onClose }) => {
                                         <div className="text-[10px] text-slate-500 font-mono mt-0.5 flex items-center gap-1"><Package size={10}/> Réf: {data.sku}</div>
                                     </td>
                                     <td className="p-4 text-center font-bold text-lg">{data.quantity}</td>
-                                    {/* 🛑 FIX: Properly formats unit from data layer */}
                                     <td className="p-4 text-center text-slate-500 text-[10px] font-bold uppercase">{getUnitLabel(data.measureUnit)}</td>
                                     <td className="p-4 text-right font-bold text-slate-900">{formatMAD(data.total)}</td>
                                 </tr>
@@ -152,7 +149,8 @@ export const InternalDeliveryNote: React.FC<Props> = ({ data, onClose }) => {
                                     <div className="flex justify-between items-center">
                                         <span className="text-slate-500">Règlement:</span>
                                         <span className={`font-black uppercase tracking-wide ${data.isQuote ? 'text-amber-600' : 'text-slate-800'}`}>
-                                            {data.isQuote ? 'EN ATTENTE' : data.paymentMethod}
+                                            {/* ✅ Affiche la traduction française passée par Dashboard.tsx */}
+                                            {data.isQuote ? 'À DÉTERMINER' : data.paymentMethod}
                                         </span>
                                     </div>
                                 </div>

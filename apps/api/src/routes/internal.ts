@@ -4,6 +4,7 @@ import { InternalController } from '../controllers/InternalController';
 import { StatsController } from '../controllers/StatsController';
 import { InternalClientController } from '../controllers/InternalClientController'; 
 import { DashboardController } from '../controllers/DashboardController';
+import { InternalPurchaseController } from '../controllers/InternalPurchaseController';
 import { authenticateToken } from '../middleware/AuthMiddleware';
 // ✅ IMPORT THE ADMIN GUARD
 import { requireAdmin } from '../middleware/RoleMiddleware'; 
@@ -42,5 +43,14 @@ router.post('/clients/:id/payment', InternalClientController.registerPayment);
 router.post('/clients/:id/legacy-debt', requireAdmin, InternalClientController.importLegacyDebt);
 router.put('/clients/:id', requireAdmin, InternalClientController.updateClient); // 🔒 ADMIN ONLY
 router.delete('/clients/:id', requireAdmin, InternalClientController.deleteClient); // 🔒 ADMIN ONLY
+// 🚛 INTERNAL SUPPLIERS (SILO B)
+// Anyone logged in can view suppliers, but only Admin can create
+router.get('/suppliers', InternalPurchaseController.getSuppliers);
+router.post('/suppliers', requireAdmin, InternalPurchaseController.createSupplier);
+
+// 🛒 INTERNAL PURCHASES / EXPENSES (SILO B)
+// Logic mirrors the legal side but stays strictly in the internal DB
+router.get('/purchases', InternalPurchaseController.getPurchaseHistory);
+router.post('/purchases', InternalPurchaseController.createPurchase);
 
 export default router;

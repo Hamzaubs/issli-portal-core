@@ -1,15 +1,20 @@
 import React, { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
-import { Menu, LayoutDashboard, Anchor, Receipt, LogOut, User, Grid, Users, Wallet, ClipboardCheck } from 'lucide-react'; 
+import { 
+  Menu, LayoutDashboard, Anchor, Receipt, LogOut, User, Grid, 
+  Users, Wallet, ClipboardCheck, Truck, ShoppingCart 
+} from 'lucide-react'; 
+
 import { Login } from './components/Login';
 import { SessionSelector } from './components/SessionSelector';
 import { GlobalDashboard } from './components/GlobalDashboard';
 import { LegalDashboard } from './components/LegalDashboard';
 import { Dashboard } from './components/Dashboard'; 
 import { InventoryDashboard } from './components/InventoryDashboard';
-
 import { ClientManager } from './components/ClientManager';
 import { LegacyExchangeWizard } from './components/LegacyExchangeWizard';
+import { SupplierManager } from './components/SupplierManager';
+import { PurchaseManager } from './components/PurchaseManager';
 
 type UserRole = 'SUPER_ADMIN' | 'LEGAL_USER' | 'POS_USER';
 
@@ -77,19 +82,25 @@ const Sidebar = ({ isOpen, close }: { isOpen: boolean; close: () => void }) => {
                  <NavItem to="/admin" icon={LayoutDashboard} label="Tableau de Bord" />
             )}
 
+            {/* SILO A: GESTION LÉGALE */}
             {(role === 'SUPER_ADMIN' || role === 'LEGAL_USER') && location.pathname.includes('/legal') && (
                  <>
                     <div className="px-4 py-2 text-[10px] uppercase font-bold text-slate-500">Gestion Légale</div>
                     <NavItem to="/legal" icon={Receipt} label="Factures & Devis" />
                     <NavItem to="/legal/clients" icon={Users} label="Clients Legal" />
+                    <NavItem to="/legal/suppliers" icon={Truck} label="Fournisseurs" />
+                    <NavItem to="/legal/purchases" icon={ShoppingCart} label="Achats & Dépenses" /> 
                 </>
             )}
             
+            {/* SILO B: POINT DE VENTE (INTERNAL) */}
             {(role === 'SUPER_ADMIN' || role === 'POS_USER') && location.pathname.includes('/pos') && (
                 <>
                     <div className="px-4 py-2 text-[10px] uppercase font-bold text-slate-500">Point de Vente</div>
                     <NavItem to="/pos" icon={Anchor} label="Opérations & Stock" />
                     <NavItem to="/pos/clients" icon={Users} label="Clients & Dettes" />
+                    <NavItem to="/pos/suppliers" icon={Truck} label="Fournisseurs (B)" />
+                    <NavItem to="/pos/purchases" icon={ShoppingCart} label="Achats (B)" />
                     <NavItem to="/pos/inventory" icon={ClipboardCheck} label="Inventaire (Vérité)" />
                 </>
             )}
@@ -118,29 +129,37 @@ const AppLayout = () => {
         </div>
         <main className="flex-1 overflow-y-auto overflow-x-hidden relative w-full bg-[#F8FAFC]">
             <Routes>
+                {/* GLOBAL ADMIN */}
                 <Route path="/admin" element={<ProtectedRoute allowedRoles={['SUPER_ADMIN']}><GlobalDashboard /></ProtectedRoute>} />
+                
+                {/* SILO A (LEGAL) ROUTES */}
                 <Route path="/legal" element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'LEGAL_USER']}><LegalDashboard /></ProtectedRoute>} />
                 <Route path="/legal/exchange" element={
-                    <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'LEGAL_USER']}>
-                        <LegacyExchangeWizard />
-                    </ProtectedRoute>
+                    <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'LEGAL_USER']}><LegacyExchangeWizard /></ProtectedRoute>
                 } />
                 <Route path="/legal/clients" element={
-                    <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'LEGAL_USER']}>
-                        <ClientManager mode="LEGAL" />
-                    </ProtectedRoute>
+                    <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'LEGAL_USER']}><ClientManager mode="LEGAL" /></ProtectedRoute>
                 } /> 
-                
+                <Route path="/legal/suppliers" element={
+                    <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'LEGAL_USER']}><SupplierManager mode="LEGAL" /></ProtectedRoute>
+                } /> 
+                <Route path="/legal/purchases" element={
+                    <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'LEGAL_USER']}><PurchaseManager mode="LEGAL" /></ProtectedRoute>
+                } />
+
+                {/* SILO B (INTERNAL/POS) ROUTES */}
                 <Route path="/pos" element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'POS_USER']}><Dashboard /></ProtectedRoute>} />
                 <Route path="/pos/clients" element={
-                    <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'POS_USER']}>
-                        <ClientManager mode="INTERNAL" />
-                    </ProtectedRoute>
+                    <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'POS_USER']}><ClientManager mode="INTERNAL" /></ProtectedRoute>
+                } />
+                <Route path="/pos/suppliers" element={
+                    <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'POS_USER']}><SupplierManager mode="INTERNAL" /></ProtectedRoute>
+                } />
+                <Route path="/pos/purchases" element={
+                    <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'POS_USER']}><PurchaseManager mode="INTERNAL" /></ProtectedRoute>
                 } />
                 <Route path="/pos/inventory" element={
-                    <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'POS_USER']}>
-                        <InventoryDashboard />
-                    </ProtectedRoute>
+                    <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'POS_USER']}><InventoryDashboard /></ProtectedRoute>
                 } />
             </Routes>
         </main>

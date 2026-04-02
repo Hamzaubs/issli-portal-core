@@ -8,6 +8,8 @@ import legalRoutes from './routes/legal';
 import authRoutes from './routes/auth'; 
 import clientRoutes from './routes/clients'; 
 import internalRoutes from './routes/internal'; // ✅ IMPORT NEW ROUTE
+import supplierRoutes from './routes/supplier.routes';
+import purchaseRoutes from './routes/purchase.routes';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -30,7 +32,8 @@ app.use(express.json());
 
 // === ROUTES ===
 app.use('/api/auth', authRoutes);
-
+app.use('/api/suppliers', supplierRoutes);
+app.use('/api/purchases', purchaseRoutes);
 // ✅ SILO A (Legal / Fiscal)
 app.use('/api/legal', legalRoutes); 
 

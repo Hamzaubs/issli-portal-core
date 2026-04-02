@@ -116,3 +116,74 @@ enum MovementType {
   QUOTE
   PAYMENT     // ✅ Standardized Payment Type
 }
+// 1. THE INTERNAL SUPPLIERS (SILO B)
+model SupplierB {
+  id          String   @id @default(uuid())
+  name        String   @db.VarChar(255)
+  contactName String?  @map("contact_name") @db.VarChar(255)
+  email       String?  @db.VarChar(255)
+  phone       String?  @db.VarChar(50)
+  address     String?  @db.Text
+  
+  // Internal reference for Moroccan tax IDs if needed
+  ice         String?  @unique @db.VarChar(50) 
+  rc          String?  @db.VarChar(50)
+  if          String?  @db.VarChar(50) 
+  patente     String?  @db.VarChar(50)
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  purchases   PurchaseB[] 
+
+  @@map("suppliers_internal")
+  @@index([ice])
+  @@index([name])
+}
+
+// 2. THE INTERNAL PURCHASES (SILO B)
+model PurchaseB {
+  id              String   @id @default(uuid())
+  reference       String   @unique // Internal ID or Supplier's Ref
+  
+  supplierId      String   @map("supplier_id")
+  supplier        SupplierB @relation(fields: [supplierId], references: [id])
+  
+  status          String   @default("EN_ATTENTE") // EN_ATTENTE, VALIDEE, PAYEE
+  type            String   @default("FACTURE_ACHAT") // BON_COMMANDE, FACTURE_ACHAT
+  
+  totalHT         Decimal  @db.Decimal(12, 2)
+  totalTTC        Decimal  @db.Decimal(12, 2)
+  amountPaid      Decimal  @default(0) @map("amount_paid") @db.Decimal(12, 2)
+
+  note            String?  @db.Text
+  
+  // Snapshots for truth-tracking
+  supplierNameSnapshot String? @map("supplier_name_snapshot")
+  supplierIceSnapshot  String? @map("supplier_ice_snapshot")
+
+  items           PurchaseItemB[]
+  
+  issuedAt        DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  @@map("purchase_invoices_internal")
+  @@index([issuedAt, status])
+  @@index([supplierId])
+}
+
+// 3. THE INTERNAL PURCHASE ITEMS (SILO B)
+model PurchaseItemB {
+  id              String   @id @default(uuid())
+  invoiceId       String
+  invoice         PurchaseB @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  
+  productId       String?  @map("product_id") 
+  productName     String
+  
+  quantity        Decimal  @db.Decimal(10, 2)
+  unitPriceHT     Decimal  @db.Decimal(10, 2)
+  vatRateSnapshot Decimal  @default(0.20) @map("vat_rate_snapshot") @db.Decimal(4, 2)
+  
+  @@map("purchase_items_internal")
+}
