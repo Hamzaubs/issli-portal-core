@@ -25,7 +25,7 @@ app.use(helmet());
 const allowedOrigins = [
     'http://localhost:5173', // For local React development
     'http://localhost:3000', // Alternative local port
-    process.env.FRONTEND_URL || 'https://isslipecheportal.ma' // Production Web App
+    process.env.FRONTEND_URL || 'https://issli-portal-core-web-ui.vercel.app' // Production Web App
 ];
 
 app.use(cors({
