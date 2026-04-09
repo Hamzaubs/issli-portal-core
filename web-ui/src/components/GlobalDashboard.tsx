@@ -1,6 +1,6 @@
 // web-ui/src/components/GlobalDashboard.tsx
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+import client from '../api/client';
 import { 
     LayoutDashboard, AlertTriangle, Building2, Calendar, RefreshCcw, 
     BarChart3, ShieldCheck, Wallet, XCircle, FileText, Search, Activity
@@ -38,9 +38,7 @@ export const GlobalDashboard = () => {
         return;
     }
 
-    axios.get(`http://localhost:3000/api/dashboard/stats?from=${dateRange.from}&to=${dateRange.to}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
+    client.get(`/dashboard/stats?from=${dateRange.from}&to=${dateRange.to}`)
     .then(res => {
         if (res.data && res.data.metrics && res.data.charts) setData(res.data);
         else throw new Error("Format de données invalide reçu du serveur.");
