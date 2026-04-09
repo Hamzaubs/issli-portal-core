@@ -1,53 +1,74 @@
+// apps/api/src/services/BackupService.ts
 import { exec } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import util from 'util';
+import archiver from 'archiver';
 
 const execPromise = util.promisify(exec);
 
 export const BackupService = {
-  async performBackup() {
-    // 1. Define Backup Directory (apps/api/backups)
-    const backupDir = path.join(__dirname, '../../backups');
-    if (!fs.existsSync(backupDir)) {
-      fs.mkdirSync(backupDir, { recursive: true });
-    }
-
+  async performBackup(): Promise<string> {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    
-    // 2. Define Targets (Silo A & Silo B)
-    // NOTE: Ensure your .env DATABASE_URLs are correct.
+    const backupDir = path.join(__dirname, '../../backups');
+    const tempDir = path.join(backupDir, `temp_${timestamp}`);
+    const zipFilePath = path.join(backupDir, `ISSLI_PECHE_ERP_SYNC_${timestamp}.zip`);
+
+    // 1. Ensure directories exist
+    if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+
+    // 2. Define Targets (Twin Silo Architecture matched to your .env)
     const targets = [
-      { name: 'LEGAL', url: process.env.DATABASE_URL_STOCK_A },
-      { name: 'INTERNAL', url: process.env.DATABASE_URL_STOCK_B }
+      { name: 'SILO_A_LEGAL', url: process.env.DATABASE_URL_LEGAL },
+      { name: 'SILO_B_INTERNAL', url: process.env.DATABASE_URL_INTERNAL }
     ];
 
-    const results = [];
+    console.log(`⏳ [BACKUP ENGINE] Initiating Synchronized Snapshot at ${timestamp}...`);
 
-    // 3. Execute pg_dump for each
-    for (const target of targets) {
+    // 3. Fire pg_dump SIMULTANEOUSLY for millisecond-perfect state matching
+    const dumpPromises = targets.map(async (target) => {
       if (!target.url) {
-        results.push({ name: target.name, status: 'SKIPPED (No URL)' });
-        continue;
+        throw new Error(`🚨 CRITICAL: Missing Database URL for ${target.name} in .env`);
       }
 
-      const filename = `${target.name}_${timestamp}.sql`;
-      const filePath = path.join(backupDir, filename);
+      // 🛡️ FIX: Strip the '?schema=public' parameter that Prisma needs but pg_dump rejects
+      const cleanUrl = target.url.split('?')[0];
 
+      const filePath = path.join(tempDir, `${target.name}.sql`);
+      
       // Command: pg_dump --dbname=URL --file=PATH
-      // We use --clean to ensure the restore overwrites old schemas
-      const command = `pg_dump "${target.url}" --clean --if-exists --file="${filePath}"`;
+      const command = `pg_dump "${cleanUrl}" --clean --if-exists --file="${filePath}"`;
+      
+      await execPromise(command);
+      console.log(`✅ [BACKUP ENGINE] Dumped ${target.name} successfully.`);
+      return filePath;
+    });
 
-      try {
-        console.log(`⏳ Backing up ${target.name}...`);
-        await execPromise(command);
-        results.push({ name: target.name, status: 'SUCCESS', file: filename });
-      } catch (error) {
-        console.error(`❌ Backup failed for ${target.name}:`, error);
-        results.push({ name: target.name, status: 'FAILED', error: error });
-      }
-    }
+    await Promise.all(dumpPromises);
 
-    return results;
+    // 4. Compress into a secure ZIP Archive
+    return new Promise((resolve, reject) => {
+      const output = fs.createWriteStream(zipFilePath);
+      const archive = archiver('zip', {
+        zlib: { level: 9 } // Maximum compression
+      });
+
+      output.on('close', () => {
+        console.log(`📦 [BACKUP ENGINE] Archive created: ${zipFilePath} (${archive.pointer()} bytes)`);
+        // Clean up the temporary raw SQL files to save disk space
+        fs.rmSync(tempDir, { recursive: true, force: true });
+        resolve(zipFilePath);
+      });
+
+      archive.on('error', (err) => {
+        console.error(`❌ [BACKUP ENGINE] Archiving failed:`, err);
+        reject(err);
+      });
+
+      archive.pipe(output);
+      archive.directory(tempDir, false);
+      archive.finalize();
+    });
   }
 };

@@ -1,21 +1,19 @@
+// apps/api/src/routes/clients.ts
 import { Router } from 'express';
 import { ClientsController } from '../controllers/ClientsController';
-import { requireAuth } from '../middleware/auth';
+import { authenticateToken } from '../middleware/AuthMiddleware';
+import { requireLegalAccess } from '../middleware/RoleMiddleware';
 
 const router = Router();
 
-// ✅ GET / - List Clients (Paginated & Searchable)
-router.get('/', requireAuth, ClientsController.getClients);
+// 🛑 SECURITY FIX: Lock entire route
+router.use(authenticateToken, requireLegalAccess);
 
-// ✅ GET /:id/global-details - Fast Profile 360° (Instant Load)
-router.get('/:id/global-details', requireAuth, ClientsController.getClientDetailsGlobal);
-
-// ✅ GET /:id/history - Infinite History (Cursor Based)
-router.get('/:id/history', requireAuth, ClientsController.getClientHistory);
-
-// ✅ CRUD Operations (Dual Write A+B)
-router.post('/', requireAuth, ClientsController.createClientGlobal);
-router.put('/:id', requireAuth, ClientsController.updateClientGlobal);
-router.delete('/:id', requireAuth, ClientsController.deleteClientGlobal);
+router.get('/', ClientsController.getClients);
+router.get('/:id/global-details', ClientsController.getClientDetailsGlobal);
+router.get('/:id/history', ClientsController.getClientHistory);
+router.post('/', ClientsController.createClientGlobal);
+router.put('/:id', ClientsController.updateClientGlobal);
+router.delete('/:id', ClientsController.deleteClientGlobal);
 
 export default router;

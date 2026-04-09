@@ -2,15 +2,17 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 
-declare global {
-  namespace Express {
-    interface Request {
-      user?: any;
-    }
-  }
+// 🛡️ Explicitly define and export the Request interface
+export interface AuthRequest extends Request {
+  user?: {
+    id: string;
+    username: string;
+    role: 'SUPER_ADMIN' | 'LEGAL_USER' | 'POS_USER';
+    portal: 'ADMIN' | 'LEGAL' | 'POS'; // The strict context we added in AuthController
+  };
 }
 
-export const authenticateToken = (req: Request, res: Response, next: NextFunction) => {
+export const authenticateToken = (req: AuthRequest, res: Response, next: NextFunction) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
@@ -25,13 +27,13 @@ export const authenticateToken = (req: Request, res: Response, next: NextFunctio
       return res.status(500).json({ error: "Erreur configuration serveur" });
   }
 
-  jwt.verify(token, secret, (err: any, user: any) => {
+  jwt.verify(token, secret, (err: any, decodedUser: any) => {
     if (err) {
       console.error("❌ Invalid Token:", err.message);
       return res.status(403).json({ error: "Session expirée ou invalide" });
     }
 
-    req.user = user; 
+    req.user = decodedUser; 
     next();
   });
 };

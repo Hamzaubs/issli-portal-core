@@ -73,49 +73,51 @@ export const InternalController = {
   },
 
   // ====================================================
-  // 📥 BATCH IMPORT (SILO B)
+  // 📥 BATCH IMPORT (SILO B) - ACID COMPLIANT
   // ====================================================
   importBatchProducts: async (req: Request, res: Response) => {
       try {
           const { products } = req.body;
-          if (!products || !Array.isArray(products)) {
-              return res.status(400).json({ error: "Données invalides" });
+          if (!products || !Array.isArray(products) || products.length === 0) {
+              return res.status(400).json({ error: "Données invalides ou vides." });
           }
 
-          let successCount = 0;
-          let errorCount = 0;
-          const errorDetails: string[] = [];
-
-          for (const item of products) {
-              try {
-                  await prismaInternal.productB.upsert({
-                      where: { internalSku: item.internalSku },
-                      update: {
-                          name: item.name,
-                          purchaseCost: safeDecimal(item.purchaseCost),
-                          sellingPrice: safeDecimal(item.sellingPrice),
-                          quantity: Number(item.quantity) || 0,
-                          measureUnit: item.measureUnit || 'UNIT',
-                      },
-                      create: {
-                          name: item.name,
-                          internalSku: item.internalSku,
-                          purchaseCost: safeDecimal(item.purchaseCost),
-                          sellingPrice: safeDecimal(item.sellingPrice),
-                          quantity: Number(item.quantity) || 0,
-                          measureUnit: item.measureUnit || 'UNIT',
-                      }
-                  });
-                  successCount++;
-              } catch (err: any) {
-                  errorCount++;
-                  errorDetails.push(`❌ Ligne ${item.internalSku}: ${err.message}`);
+          // 🛡️ Map all products into an array of Prisma Promises
+          const upsertOperations = products.map((item: any) => {
+              if (!item.internalSku || !item.name) {
+                  throw new Error(`Produit sans nom ou SKU détecté.`);
               }
-          }
 
-          res.json({ success: successCount, errors: errorCount, errorDetails });
+              return prismaInternal.productB.upsert({
+                  where: { internalSku: item.internalSku },
+                  update: {
+                      name: item.name,
+                      purchaseCost: safeDecimal(item.purchaseCost),
+                      sellingPrice: safeDecimal(item.sellingPrice),
+                      quantity: Number(item.quantity) || 0,
+                      measureUnit: item.measureUnit || 'UNIT',
+                  },
+                  create: {
+                      name: item.name,
+                      internalSku: item.internalSku,
+                      purchaseCost: safeDecimal(item.purchaseCost),
+                      sellingPrice: safeDecimal(item.sellingPrice),
+                      quantity: Number(item.quantity) || 0,
+                      measureUnit: item.measureUnit || 'UNIT',
+                  }
+              });
+          });
+
+          // 🛡️ Execute ALL promises in a strict ACID Transaction
+          await prismaInternal.$transaction(upsertOperations);
+
+          res.json({ success: products.length, message: "Transaction ACID réussie." });
+
       } catch (e: any) {
-          res.status(500).json({ error: "Erreur serveur lors de l'import." });
+          console.error("Erreur Transaction Batch Internal:", e);
+          res.status(400).json({ 
+              error: e.message || "Erreur de format de données. L'importation entière a été annulée par sécurité." 
+          });
       }
   },
 

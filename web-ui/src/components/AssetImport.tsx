@@ -88,40 +88,27 @@ export const AssetImport: React.FC<Props> = ({ onCancel, onSuccess }) => {
         }
     };
 
-    // 📤 2. SEND TO API
+   // 📤 2. SEND TO API (Upgraded to ACID Batch Request)
     const handleImport = async () => {
         if (preview.length === 0) return;
         setUploading(true);
         setLogs([]);
 
-        let successCount = 0;
-        let errorCount = 0;
-        const newLogs = [];
+        try {
+            // Send ALL products in ONE single request to prevent server flooding
+            const response = await client.post('/legal/products/batch-import', { 
+                products: preview 
+            });
 
-        // Sequential Import for Safety
-        for (const item of preview) {
-            try {
-                await client.post('/legal/products', item);
-                successCount++;
-            } catch (err: any) {
-                errorCount++;
-                // Check if duplicate serial number
-                const msg = err.response?.data?.error || 'Erreur inconnue';
-                newLogs.push(`❌ ${item.name} (${item.serialNumber}): ${msg}`);
-            }
-        }
-
-        setLogs(newLogs);
-        setUploading(false);
-
-        if (successCount > 0) {
-            // Partial or Full Success
-            if (errorCount === 0) {
-                alert(`✅ Succès ! ${successCount} produits importés.`);
-                onSuccess();
-            } else {
-                alert(`⚠️ Import Partiel.\n✅ ${successCount} réussis\n❌ ${errorCount} échoués (Voir logs)`);
-            }
+            alert(`✅ Succès ! ${response.data.success} produits importés/mis à jour avec succès.`);
+            onSuccess();
+        } catch (err: any) {
+            console.error("Batch Import Error:", err);
+            const msg = err.response?.data?.error || "Erreur critique lors de la transaction.";
+            setLogs([`❌ Échec total de l'importation : ${msg}`]);
+            alert("⚠️ L'importation a été annulée pour protéger la base de données.");
+        } finally {
+            setUploading(false);
         }
     };
 

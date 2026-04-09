@@ -5,35 +5,35 @@ import { StatsController } from '../controllers/StatsController';
 import { InternalClientController } from '../controllers/InternalClientController'; 
 import { DashboardController } from '../controllers/DashboardController';
 import { InternalPurchaseController } from '../controllers/InternalPurchaseController';
+
+// 🛡️ SECURITY FIX: Imported proper context guards
 import { authenticateToken } from '../middleware/AuthMiddleware';
-// ✅ IMPORT THE ADMIN GUARD
-import { requireAdmin } from '../middleware/RoleMiddleware'; 
+import { requireAdmin, requirePosAccess } from '../middleware/RoleMiddleware'; 
 
 const router = Router();
-router.use(authenticateToken); // Basic login check
+
+// 🛑 SECURITY FIX: Globally lock this entire router to POS/Admin Context
+router.use(authenticateToken, requirePosAccess);
 
 // 📦 Products
-router.get('/products', InternalController.getProducts); // Anyone logged in can read
-
-// 🔒 SUPER ADMIN ONLY (Create, Edit, Delete)
+router.get('/products', InternalController.getProducts); 
 router.post('/products', requireAdmin, InternalController.createProduct); 
 router.put('/products/:id', requireAdmin, InternalController.updateProduct); 
 router.delete('/products/:id', requireAdmin, InternalController.deleteProduct); 
 router.post('/products/batch-import', requireAdmin, InternalController.importBatchProducts);
-// 📝 Inventory Bulk Adjustments
-router.post('/inventory/adjust', requireAdmin, InternalController.adjustInventoryBatch); // 🔒 ADMIN ONLY
+router.post('/inventory/adjust', requireAdmin, InternalController.adjustInventoryBatch); 
 
 // 💰 Transactions
 router.get('/transactions', InternalController.getTransactions);
 router.post('/transactions', InternalController.createTransaction);
 router.post('/transactions/batch', InternalController.createBatchTransaction); 
-router.post('/transactions/:id/void', requireAdmin, InternalController.voidTransaction); // 🔒 ADMIN ONLY
+router.post('/transactions/:id/void', requireAdmin, InternalController.voidTransaction); 
 
 // 📊 Analytics & Stats
 router.get('/stats', StatsController.getGlobalStats);
 router.get('/analytics', DashboardController.getInternalAnalytics);
 
-// 👥 CLIENTS (BIG DATA OPTIMIZED)
+// 👥 CLIENTS
 router.get('/clients', InternalClientController.searchClients);
 router.post('/clients', InternalClientController.createClient);
 router.get('/clients/:id/details', InternalClientController.getClientDetails); 
@@ -41,15 +41,14 @@ router.get('/clients/:id/history', InternalClientController.getClientHistory);
 router.get('/clients/:id/statement', InternalClientController.getClientStatement); 
 router.post('/clients/:id/payment', InternalClientController.registerPayment); 
 router.post('/clients/:id/legacy-debt', requireAdmin, InternalClientController.importLegacyDebt);
-router.put('/clients/:id', requireAdmin, InternalClientController.updateClient); // 🔒 ADMIN ONLY
-router.delete('/clients/:id', requireAdmin, InternalClientController.deleteClient); // 🔒 ADMIN ONLY
-// 🚛 INTERNAL SUPPLIERS (SILO B)
-// Anyone logged in can view suppliers, but only Admin can create
+router.put('/clients/:id', requireAdmin, InternalClientController.updateClient); 
+router.delete('/clients/:id', requireAdmin, InternalClientController.deleteClient); 
+
+// 🚛 INTERNAL SUPPLIERS
 router.get('/suppliers', InternalPurchaseController.getSuppliers);
 router.post('/suppliers', requireAdmin, InternalPurchaseController.createSupplier);
 
-// 🛒 INTERNAL PURCHASES / EXPENSES (SILO B)
-// Logic mirrors the legal side but stays strictly in the internal DB
+// 🛒 INTERNAL PURCHASES
 router.get('/purchases', InternalPurchaseController.getPurchaseHistory);
 router.post('/purchases', InternalPurchaseController.createPurchase);
 

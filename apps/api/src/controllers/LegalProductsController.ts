@@ -154,5 +154,57 @@ export const LegalProductsController = {
           console.error(e);
           res.status(500).json({ error: "Erreur historique produit" });
       }
+  },
+
+  // ====================================================
+  // 📥 BATCH IMPORT (SILO A - LEGAL) - ACID COMPLIANT
+  // ====================================================
+  importBatchProducts: async (req: Request, res: Response) => {
+      try {
+          const { products } = req.body;
+          if (!products || !Array.isArray(products) || products.length === 0) {
+              return res.status(400).json({ error: "Données invalides ou vides." });
+          }
+
+          // 🛡️ Map all products into an array of Prisma Promises
+          const upsertOperations = products.map((item: any) => {
+              if (!item.serialNumber || !item.name) {
+                  throw new Error(`Produit sans nom ou Référence (serialNumber) détecté.`);
+              }
+
+              return prismaLegal.productA.upsert({
+                  where: { serialNumber: item.serialNumber },
+                  update: {
+                      name: item.name,
+                      purchaseCost: item.purchaseCost ? new Prisma.Decimal(item.purchaseCost.toString()) : new Prisma.Decimal(0),
+                      priceHT: item.priceHT ? new Prisma.Decimal(item.priceHT.toString()) : new Prisma.Decimal(0),
+                      vatRate: item.vatRate ? new Prisma.Decimal(item.vatRate.toString()) : new Prisma.Decimal(0.20),
+                      quantity: Number(item.quantity) || 0,
+                      measureUnit: item.measureUnit || 'UNIT',
+                  },
+                  create: {
+                      name: item.name,
+                      serialNumber: item.serialNumber,
+                      purchaseCost: item.purchaseCost ? new Prisma.Decimal(item.purchaseCost.toString()) : new Prisma.Decimal(0),
+                      priceHT: item.priceHT ? new Prisma.Decimal(item.priceHT.toString()) : new Prisma.Decimal(0),
+                      vatRate: item.vatRate ? new Prisma.Decimal(item.vatRate.toString()) : new Prisma.Decimal(0.20),
+                      quantity: Number(item.quantity) || 0,
+                      measureUnit: item.measureUnit || 'UNIT',
+                  }
+              });
+          });
+
+          // 🛡️ Execute ALL promises in a strict ACID Transaction
+          // If ONE upsert fails, the entire transaction rolls back automatically
+          await prismaLegal.$transaction(upsertOperations);
+
+          res.json({ success: products.length, message: "Transaction ACID réussie." });
+
+      } catch (e: any) {
+          console.error("Erreur Transaction Batch Legal:", e);
+          res.status(400).json({ 
+              error: e.message || "Erreur de format de données. L'importation entière a été annulée par sécurité." 
+          });
+      }
   }
 };

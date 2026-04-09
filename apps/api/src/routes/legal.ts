@@ -1,105 +1,63 @@
 // apps/api/src/routes/legal.ts
 import { Router } from 'express';
-// ✅ NEW: The Controller for Sales, Returns, Debt & Exchanges
 import { InvoicesController } from '../controllers/InvoicesController';
-
-// ♻️ EXISTING: Keeping your old controllers for other features
 import { LegalController } from '../controllers/LegalController';
 import { LegalReportController } from '../controllers/LegalReportController'; 
 import { LegalProductsController } from '../controllers/LegalProductsController'; 
 import { SettingsController } from '../controllers/SettingsController'; 
 import { ExpenseController } from '../controllers/ExpenseController'; 
-
-// 🎯 UPGRADED: The dedicated Legal Clients controller with the new Ledger Engine
 import { ClientsController } from '../controllers/ClientsController';
 
-// 🛡️ SECURITY
-import { requireAuth } from '../middleware/auth';
+// 🛡️ SECURITY FIX: Replaced old requireAuth with authenticateToken
+import { authenticateToken } from '../middleware/AuthMiddleware';
 import { requireLegalAccess, requireAdmin } from '../middleware/RoleMiddleware';
 
 const router = Router();
 
 // =================================================================
-// 🛑 1. BASE SECURITY (Only Admin & Legal Users)
+// 🛑 1. BASE SECURITY: Hermetically sealed for Legal / Admin ONLY
 // =================================================================
-router.use(requireAuth, requireLegalAccess);
+router.use(authenticateToken, requireLegalAccess);
 
-
-// =================================================================
-// 📄 NEW DOCUMENTS SYSTEM (Sales, Returns, Quotes, Debt)
-// =================================================================
-// 🔍 List & Search
+// 📄 NEW DOCUMENTS SYSTEM
 router.get('/documents', InvoicesController.getDocuments); 
-
-// 🖨️ FETCH SINGLE DOCUMENT (For Printing/Details)
 router.get('/invoices/:id', InvoicesController.getDocumentById);
-
-// ➕ Create Global (Sale / Return / Quote) - Supports Ghost Products
 router.post('/documents', InvoicesController.createDocument); 
-
-// 💰 Solder / Pay Debt (Partial Payments)
 router.post('/invoices/:id/payment', InvoicesController.addPayment); 
-
-// 🔄 Convert Quote -> Invoice
 router.post('/invoices/:id/convert-quote', InvoicesController.convertQuote);
-
-// 💱 LEGACY EXCHANGE (Old System Returns -> New System Buy)
-// 🔒 Secured: Only Admin can validate a return of items that don't exist in DB.
 router.post('/invoices/exchange', requireAdmin, InvoicesController.processLegacyExchange);
-
-// ↩️ Returns & Cancellations (Unified "Avoir" Logic)
 router.post('/invoices/:id/credit-note', requireAdmin, InvoicesController.createCreditNote); 
 router.post('/invoices/:id/cancel', requireAdmin, InvoicesController.cancelInvoice);
 
-// =================================================================
-// 📦 PRODUCTS (Inventory Management)
-// =================================================================
+// 📦 PRODUCTS
 router.get('/products', LegalProductsController.getProducts); 
-
-// 🔒 SUPER ADMIN ONLY (Create, Edit, Delete)
 router.post('/products', requireAdmin, LegalProductsController.createProduct); 
 router.put('/products/:id', requireAdmin, LegalProductsController.updateProduct); 
 router.delete('/products/:id', requireAdmin, LegalProductsController.deleteProduct); 
-
-// ✅ NEW: Product History (Audit Traceability)
 router.get('/products/:id/history', LegalProductsController.getProductHistory);
+// ✅ NEW ROUTE: Secure Batch Import for Silo A
+router.post('/products/batch-import', requireAdmin, LegalProductsController.importBatchProducts);
 
-
-// =================================================================
-// 👥 CLIENTS (Mapped to the Upgraded ClientsController)
-// =================================================================
+// 👥 CLIENTS
 router.get('/clients', ClientsController.getClients); 
 router.get('/clients/:id', ClientsController.getClientDetailsGlobal); 
-
-// 📜 THE NEW LEDGER ENGINE (Relevé de compte)
 router.get('/clients/:id/statement', ClientsController.getClientStatement); 
-
-// 📜 LEGAL HISTORY (Historique des documents)
 router.get('/clients/:id/history', ClientsController.getClientHistory); 
-
 router.post('/clients', ClientsController.createClientGlobal); 
-router.put('/clients/:id', requireAdmin, ClientsController.updateClientGlobal); // 🔒 ADMIN ONLY
-router.delete('/clients/:id', requireAdmin, ClientsController.deleteClientGlobal); // 🔒 ADMIN ONLY
+router.put('/clients/:id', requireAdmin, ClientsController.updateClientGlobal);
+router.delete('/clients/:id', requireAdmin, ClientsController.deleteClientGlobal);
 
-
-// =================================================================
-// 📊 STATS & REPORTS (Silo A)
-// =================================================================
+// 📊 STATS & REPORTS
 router.get('/stats', LegalController.getStats); 
 router.get('/reports/analytics', LegalReportController.getAnalytics); 
-
-// ✅ FIX: Dynamic CSV Export Route (Matches Controller logic)
 router.get('/reports/:type', LegalReportController.getExport);
 
-
-// =================================================================
-// ⚙️ SETTINGS & EXPENSES (Admin Only Features)
-// =================================================================
+// ⚙️ SETTINGS & EXPENSES
 router.get('/settings', SettingsController.getSettings); 
-router.put('/settings', requireAdmin, SettingsController.updateSettings); // 🔒 ADMIN ONLY
-
-router.get('/expenses', requireAdmin, ExpenseController.getExpenses); // 🔒 ADMIN ONLY
-router.post('/expenses', requireAdmin, ExpenseController.createExpense); // 🔒 ADMIN ONLY
-router.delete('/expenses/:id', requireAdmin, ExpenseController.deleteExpense); // 🔒 ADMIN ONLY
+router.get('/settings/backup', requireAdmin, SettingsController.downloadBackup); 
+router.put('/settings', requireAdmin, SettingsController.updateSettings);
+router.get('/expenses', requireAdmin, ExpenseController.getExpenses);
+router.post('/expenses', requireAdmin, ExpenseController.createExpense);
+router.delete('/expenses/:id', requireAdmin, ExpenseController.deleteExpense);
 
 export default router;
