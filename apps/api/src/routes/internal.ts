@@ -11,7 +11,7 @@ import { requireAdmin, requirePosAccess } from '../middleware/RoleMiddleware';
 
 const router = Router();
 
-// Globally lock this entire router to Auth + POS Access
+// 🛑 SECURITY FIX: Globally lock this entire router to POS/Admin Context
 router.use(authenticateToken, requirePosAccess);
 
 // 📦 Products
@@ -32,16 +32,22 @@ router.post('/transactions/:id/void', requireAdmin, InternalController.voidTrans
 router.get('/stats', StatsController.getGlobalStats);
 router.get('/analytics', DashboardController.getInternalAnalytics);
 
-// 👥 Clients
+// 👥 CLIENTS
 router.get('/clients', InternalClientController.searchClients);
 router.post('/clients', InternalClientController.createClient);
 router.get('/clients/:id/details', InternalClientController.getClientDetails); 
 router.get('/clients/:id/history', InternalClientController.getClientHistory); 
+router.get('/clients/:id/statement', InternalClientController.getClientStatement); 
 router.post('/clients/:id/payment', InternalClientController.registerPayment); 
+router.post('/clients/:id/legacy-debt', requireAdmin, InternalClientController.importLegacyDebt);
+router.put('/clients/:id', requireAdmin, InternalClientController.updateClient); 
+router.delete('/clients/:id', requireAdmin, InternalClientController.deleteClient); 
 
-// 🚛 Internal Suppliers & Purchases
+// 🚛 INTERNAL SUPPLIERS
 router.get('/suppliers', InternalPurchaseController.getSuppliers);
 router.post('/suppliers', requireAdmin, InternalPurchaseController.createSupplier);
+
+// 🛒 INTERNAL PURCHASES
 router.get('/purchases', InternalPurchaseController.getPurchaseHistory);
 router.post('/purchases', InternalPurchaseController.createPurchase);
 
