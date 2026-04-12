@@ -4,7 +4,7 @@ import {
   History, Pencil, Ruler, Weight, Droplets,
   ClipboardList, Box, LogOut, Grid, User,
   ChevronRight, FileText, PieChart, CreditCard, Truck, Banknote, Building2,
-  AlertCircle, FileSpreadsheet, Trash 
+  AlertCircle, FileSpreadsheet, Trash, X, PlusCircle, MinusCircle 
 } from 'lucide-react';
 
 import client from '../api/client';
@@ -19,6 +19,11 @@ import { InternalAssetImport } from './InternalAssetImport';
 interface ProductB {
   id: string; name: string; internalSku: string; purchaseCost: number; sellingPrice: number; quantity: number;
   measureUnit: string; technicalSpecs?: string;
+}
+
+interface CartItem {
+  product: ProductB;
+  quantity: number;
 }
 
 const PAYMENT_LABELS: Record<string, string> = {
@@ -44,8 +49,8 @@ export const Dashboard = ({ user }: { user?: any }) => {
 
   const [showAnonymousConfirm, setShowAnonymousConfirm] = useState(false);
 
-  const [selectedProduct, setSelectedProduct] = useState<ProductB | null>(null);
-  const [transactionQty, setTransactionQty] = useState(1);
+  // 🛒 CART STATE (Replaces selectedProduct)
+  const [cart, setCart] = useState<CartItem[]>([]);
   const [submitting, setSubmitting] = useState(false);
   
   const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'CHECK' | 'TRANSFER' | 'CREDIT' | 'QUOTE'>('CASH');
@@ -78,9 +83,36 @@ export const Dashboard = ({ user }: { user?: any }) => {
   }, [refresh, viewMode]);
 
   const formatMAD = (amount: number) => new Intl.NumberFormat('fr-MA', { style: 'currency', currency: 'MAD' }).format(amount);
+
+  // 🛒 CART LOGIC
+  const handleAddToCart = (p: ProductB) => {
+    setCart(prev => {
+        const exists = prev.find(item => item.product.id === p.id);
+        if (exists) {
+            return prev.map(item => item.product.id === p.id ? { ...item, quantity: item.quantity + 1 } : item);
+        }
+        return [...prev, { product: p, quantity: 1 }];
+    });
+  };
+
+  const updateCartQty = (productId: string, delta: number) => {
+    setCart(prev => prev.map(item => {
+        if (item.product.id === productId) {
+            const newQty = Math.max(0.1, item.quantity + delta);
+            return { ...item, quantity: newQty };
+        }
+        return item;
+    }).filter(i => i.quantity > 0));
+  };
+
+  const removeFromCart = (productId: string) => {
+    setCart(prev => prev.filter(item => item.product.id !== productId));
+  };
+
+  const cartTotal = cart.reduce((sum, item) => sum + (item.product.sellingPrice * item.quantity), 0);
   
   const handleTransaction = async (bypassConfirm: boolean = false) => {
-    if (!selectedProduct) return;
+    if (cart.length === 0) return;
     
     if ((paymentMethod === 'CREDIT' || paymentMethod === 'QUOTE') && !activeClient) {
         alert("⚠️ Client requis pour une vente à crédit ou un devis.");
@@ -93,48 +125,47 @@ export const Dashboard = ({ user }: { user?: any }) => {
         return;
     }
 
-    let type = 'SALE_CASH';
-    if (returnMode) type = 'RETURN';
-    if (paymentMethod === 'QUOTE') type = 'QUOTE';
+    const type = paymentMethod === 'QUOTE' ? 'QUOTE' : returnMode ? 'RETURN' : 'SALE_CASH';
 
-    const qtyNum = parseFloat(transactionQty.toString());
-    if (type === 'SALE_CASH' && selectedProduct.quantity < qtyNum) {
-        alert(`❌ Stock Insuffisant !\nDisponible : ${selectedProduct.quantity} ${getUnitLabel(selectedProduct.measureUnit)}`);
-        return;
-    }
-
-    if (!activeClient && (type === 'SALE_CASH' || type === 'RETURN') && !bypassConfirm) {
+    if (!activeClient && (type !== 'QUOTE') && !bypassConfirm) {
         setShowAnonymousConfirm(true);
         return; 
     }
 
     setSubmitting(true);
     try {
-      await client.post('/internal/transactions', { 
-          productId: selectedProduct.id, 
+      const batchId = 'INT-' + Math.random().toString(36).substring(7).toUpperCase();
+
+      await client.post('/internal/transactions/batch', { 
+          items: cart.map(i => ({ productId: i.product.id, quantity: i.quantity, unitPrice: i.product.sellingPrice })),
           userId: currentUser.id, 
-          quantity: qtyNum,
           type,
           clientId: activeClient?.id,
           paymentMethod: type === 'QUOTE' ? undefined : paymentMethod,
-          paymentRef,
-          measureUnit: selectedProduct.measureUnit || 'UNIT' 
+          paymentRef
       });
       
       setRefresh(prev => prev + 1);
       setReceiptData({ 
-          productName: selectedProduct.name, sku: selectedProduct.internalSku, 
-          quantity: qtyNum, unitPrice: selectedProduct.sellingPrice, 
-          total: selectedProduct.sellingPrice * qtyNum, 
-          date: new Date(), id: 'TRX-' + Math.random().toString(36).substring(7).toUpperCase(),
-          measureUnit: selectedProduct.measureUnit,
+          id: batchId,
+          date: new Date(), 
           clientName: activeClient?.name,
           paymentMethod: type === 'QUOTE' ? 'DEVIS' : PAYMENT_LABELS[paymentMethod], 
           paymentRef, 
           isReturn: returnMode,
-          isQuote: type === 'QUOTE' 
+          isQuote: type === 'QUOTE',
+          total: cartTotal,
+          items: cart.map(item => ({
+              productName: item.product.name,
+              sku: item.product.internalSku,
+              quantity: item.quantity,
+              unitPrice: item.product.sellingPrice,
+              total: item.product.sellingPrice * item.quantity,
+              measureUnit: item.product.measureUnit
+          }))
       });
-      setSelectedProduct(null); setTransactionQty(1); setPaymentMethod('CASH'); setPaymentRef('');
+
+      setCart([]); setPaymentMethod('CASH'); setPaymentRef('');
     } catch (err: any) { 
         alert(err.response?.data?.error || "Erreur transaction"); 
     } finally { setSubmitting(false); }
@@ -153,7 +184,7 @@ export const Dashboard = ({ user }: { user?: any }) => {
   }
 
   return (
-    <div className="h-screen flex bg-slate-100 overflow-hidden relative">
+    <div className="h-screen flex bg-slate-100 overflow-hidden relative font-sans">
       
       {showAnonymousConfirm && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
@@ -219,7 +250,7 @@ export const Dashboard = ({ user }: { user?: any }) => {
             {historyMode ? <MovementHistory /> : (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                     {products.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase())).map(p => (
-                        <div key={p.id} onClick={() => setSelectedProduct(p)} className={`group cursor-pointer bg-white rounded-2xl p-4 border-2 transition-all ${selectedProduct?.id === p.id ? 'border-emerald-600 shadow-lg' : 'border-transparent shadow-sm'}`}>
+                        <div key={p.id} onClick={() => handleAddToCart(p)} className={`group cursor-pointer bg-white rounded-2xl p-4 border-2 transition-all hover:scale-[1.02] active:scale-95 ${cart.some(item => item.product.id === p.id) ? 'border-emerald-600 shadow-lg' : 'border-transparent shadow-sm'}`}>
                             <div className="flex justify-between items-start mb-2"><span className="text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded uppercase">{p.internalSku}</span></div>
                             <h3 className="font-bold text-slate-800 text-sm h-10 line-clamp-2">{p.name}</h3>
                             <div className="mt-4 flex justify-between items-end border-t pt-2">
@@ -241,49 +272,35 @@ export const Dashboard = ({ user }: { user?: any }) => {
           </div>
           
           <div className="flex-1 p-6 overflow-y-auto">
-            {selectedProduct ? (
+            {cart.length > 0 ? (
                 <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
-                    <div className="text-center">
-                        <h3 className="text-xl font-black text-slate-800">{selectedProduct.name}</h3>
-                        
-                        {isAdmin && (
-                            <div className="flex items-center justify-center gap-2 mt-3">
-                                <button 
-                                    onClick={() => { setEditingProduct(selectedProduct); setShowProductForm(true); }} 
-                                    className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-xs font-bold transition-colors"
-                                >
-                                    <Pencil size={14}/> Modifier
-                                </button>
-                                <button 
-                                    onClick={async () => {
-                                        if (!window.confirm(`Supprimer définitivement ${selectedProduct.name} ?`)) return;
-                                        try {
-                                            await client.delete(`/internal/products/${selectedProduct.id}`);
-                                            setRefresh(p => p + 1);
-                                            setSelectedProduct(null);
-                                        } catch (err: any) {
-                                            alert(err.response?.data?.error || "Erreur de suppression.");
-                                        }
-                                    }} 
-                                    className="flex items-center gap-1 px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg text-xs font-bold transition-colors"
-                                >
-                                    <Trash size={14}/> Supprimer
-                                </button>
-                            </div>
-                        )}
+                    <div className="flex justify-between items-center border-b pb-2">
+                        <h3 className="text-sm font-black text-slate-800 uppercase">Panier</h3>
+                        <button onClick={() => setCart([])} className="text-[10px] font-bold text-red-500 hover:underline">Vider</button>
+                    </div>
 
-                        <div className="flex items-center justify-center gap-4 mt-6">
-                            <button onClick={() => setTransactionQty(Math.max(1, transactionQty - 1))} className="w-12 h-12 bg-slate-100 rounded-xl font-black hover:bg-slate-200">-</button>
-                            <div className="flex items-baseline">
-                                <span className="text-4xl font-black text-slate-900">{transactionQty}</span>
-                                <span className="text-xs font-bold text-slate-400 ml-1 pb-1">{getUnitLabel(selectedProduct.measureUnit)}</span>
+                    <div className="space-y-3">
+                        {cart.map((item) => (
+                            <div key={item.product.id} className="bg-slate-50 p-3 rounded-xl border border-slate-200 relative group">
+                                <button onClick={() => removeFromCart(item.product.id)} className="absolute top-2 right-2 text-slate-300 hover:text-red-500 transition-colors">
+                                    <X size={14} />
+                                </button>
+                                <h4 className="text-xs font-bold text-slate-800 line-clamp-2 pr-4">{item.product.name}</h4>
+                                <div className="flex justify-between items-center mt-3">
+                                    <div className="flex items-center gap-2 bg-white rounded-lg border shadow-sm px-2 py-1">
+                                        <button onClick={() => updateCartQty(item.product.id, -1)} className="text-slate-400 hover:text-emerald-600 transition-colors"><MinusCircle size={18}/></button>
+                                        <span className="text-sm font-black w-6 text-center">{item.quantity}</span>
+                                        <button onClick={() => updateCartQty(item.product.id, 1)} className="text-slate-400 hover:text-emerald-600 transition-colors"><PlusCircle size={18}/></button>
+                                    </div>
+                                    <span className="text-sm font-black text-slate-900">{formatMAD(item.product.sellingPrice * item.quantity)}</span>
+                                </div>
                             </div>
-                            <button onClick={() => setTransactionQty(transactionQty + 1)} className="w-12 h-12 bg-slate-100 rounded-xl font-black hover:bg-slate-200">+</button>
-                        </div>
-                        <div className="mt-8 p-4 bg-slate-900 rounded-2xl text-white">
-                            <p className="text-[10px] text-slate-400 font-bold uppercase">Total {paymentMethod === 'QUOTE' ? 'Estimé' : ''}</p>
-                            <h4 className="text-2xl font-black">{formatMAD(selectedProduct.sellingPrice * transactionQty)}</h4>
-                        </div>
+                        ))}
+                    </div>
+
+                    <div className="mt-4 p-4 bg-slate-900 rounded-2xl text-white shadow-xl">
+                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">Total TTC</p>
+                        <h4 className="text-2xl font-black text-emerald-400">{formatMAD(cartTotal)}</h4>
                     </div>
 
                     {!returnMode && (
@@ -293,13 +310,12 @@ export const Dashboard = ({ user }: { user?: any }) => {
                                     <button 
                                       key={m} 
                                       onClick={() => setPaymentMethod(m as any)} 
-                                      className={`p-3 rounded-xl border-2 text-[10px] font-black uppercase tracking-wider ${paymentMethod === m ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-100 text-slate-600 hover:border-slate-300'}`}
+                                      className={`p-3 rounded-xl border-2 text-[10px] font-black uppercase tracking-wider transition-all ${paymentMethod === m ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-100 text-slate-600 hover:border-slate-300'}`}
                                     >
                                         {PAYMENT_LABELS[m]}
                                     </button>
                                 ))}
                             </div>
-                            
                             <button onClick={() => setPaymentMethod('QUOTE')} className={`w-full p-3 rounded-xl border-2 text-[11px] font-black uppercase tracking-widest transition-all ${paymentMethod === 'QUOTE' ? 'border-amber-500 bg-amber-50 text-amber-700' : 'border-slate-100 text-slate-500 hover:border-slate-300'}`}>
                                 📝 CRÉER UN DEVIS
                             </button>
@@ -319,8 +335,8 @@ export const Dashboard = ({ user }: { user?: any }) => {
           </div>
 
           <div className="p-6 border-t border-slate-200">
-              <button onClick={() => handleTransaction(false)} disabled={!selectedProduct || submitting} 
-                className={`w-full py-4 text-white font-black rounded-2xl shadow-lg disabled:opacity-50 transition-colors ${returnMode ? 'bg-red-600 hover:bg-red-700' : paymentMethod === 'QUOTE' ? 'bg-amber-500 hover:bg-amber-600 text-slate-900' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
+              <button onClick={() => handleTransaction(false)} disabled={cart.length === 0 || submitting} 
+                className={`w-full py-4 text-white font-black rounded-2xl shadow-lg disabled:opacity-50 transition-all active:scale-[0.98] ${returnMode ? 'bg-red-600 hover:bg-red-700' : paymentMethod === 'QUOTE' ? 'bg-amber-500 hover:bg-amber-600 text-slate-900' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
                   {submitting ? '...' : returnMode ? 'VALIDER RETOUR' : paymentMethod === 'QUOTE' ? 'GÉNÉRER DEVIS' : 'VALIDER TRANSACTION'}
               </button>
           </div>
