@@ -70,24 +70,29 @@ export const PurchaseController = {
   },
 
   // 2. Get all Purchases (with optional supplier filter)
-  getAll: async (req: Request, res: Response) => {
-    try {
-      const { supplierId, type } = req.query;
-      
-      const whereClause: any = {};
-      if (supplierId) whereClause.supplierId = String(supplierId);
-      if (type) whereClause.type = String(type);
+  // apps/api/src/controllers/PurchaseController.ts
 
-      const purchases = await prismaLegal.purchaseInvoice.findMany({
-        where: whereClause,
-        include: { supplier: { select: { name: true, ice: true } } },
-        orderBy: { issuedAt: 'desc' }
-      });
+getAll: async (req: Request, res: Response) => {
+  try {
+    const { supplierId, type } = req.query;
+    
+    const whereClause: any = {};
+    if (supplierId) whereClause.supplierId = String(supplierId);
+    if (type) whereClause.type = String(type);
 
-      res.status(200).json(purchases);
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Erreur lors de la récupération des achats." });
-    }
+    const purchases = await prismaLegal.purchaseInvoice.findMany({
+      where: whereClause,
+      include: { 
+        supplier: { select: { name: true, ice: true } },
+        items: true // 🔥 THIS WAS MISSING: Now items will be sent to the frontend
+      },
+      orderBy: { issuedAt: 'desc' }
+    });
+
+    res.status(200).json(purchases);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Erreur lors de la récupération des achats." });
   }
+}
 };

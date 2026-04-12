@@ -87,14 +87,18 @@ export const InternalPurchaseController = {
 
   // 4. Get Internal Purchase History
   getPurchaseHistory: async (req: Request, res: Response) => {
-    try {
-      const purchases = await prismaInternal.purchaseB.findMany({
-        include: { supplier: { select: { name: true } } },
-        orderBy: { issuedAt: 'desc' }
-      });
-      res.json(purchases);
-    } catch (e) {
-      res.status(500).json({ error: "Erreur historique achats" });
-    }
+  try {
+    const purchases = await prismaInternal.purchaseB.findMany({
+      include: { 
+        supplier: { select: { name: true } },
+        items: true // 🔥 ADDED: This pulls the articles into the response
+      },
+      orderBy: { issuedAt: 'desc' }
+    });
+    res.json(purchases);
+  } catch (e) {
+    console.error(e); // Added logging for better debugging
+    res.status(500).json({ error: "Erreur historique achats" });
   }
+}
 };
