@@ -1,6 +1,6 @@
 // apps/api/src/services/InvoiceService.ts
 import { prismaLegal } from '@marine/db-legal';
-import { Prisma } from '@prisma/client-legal';
+import { Prisma } from '@marine/db-legal';
 
 // 🛡️ MATH ENGINE: Work in "Centimes" (Integers) to avoid Floating Point Drift
 const toCents = (n: number | Prisma.Decimal | string | null): number => {

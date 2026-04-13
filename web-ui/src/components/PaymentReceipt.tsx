@@ -1,4 +1,3 @@
-// web-ui/src/components/PaymentReceipt.tsx
 import React, { useEffect, useRef } from 'react';
 import { useReactToPrint } from 'react-to-print';
 import { X, CheckCircle, User, FileText } from 'lucide-react';
@@ -23,7 +22,6 @@ export const PaymentReceipt = ({ data, onClose }: { data: PaymentData, onClose: 
     documentTitle: `Recu_${data.id}`
   });
 
-  // Auto-print on mount
   useEffect(() => {
     if (handlePrint) {
       handlePrint();
@@ -33,6 +31,7 @@ export const PaymentReceipt = ({ data, onClose }: { data: PaymentData, onClose: 
   const formatMAD = (amount: number) => 
     new Intl.NumberFormat('fr-MA', { style: 'currency', currency: 'MAD' }).format(Number(amount) || 0);
 
+  // ✅ Perfect French Translation 
   const getMethodLabel = (m: string) => {
       switch(m) {
           case 'CASH': case 'ESPECES': return 'ESPÈCES';
@@ -81,13 +80,15 @@ export const PaymentReceipt = ({ data, onClose }: { data: PaymentData, onClose: 
 
               <div className="flex justify-between text-xs mb-1">
                  <span className="text-slate-500">Mode</span>
+                 {/* ✅ Inject Translation */}
                  <span className="font-bold">{getMethodLabel(data.method)}</span>
               </div>
 
+              {/* ✅ Print Reference Explicitly */}
               {data.reference && (
-                  <div className="flex justify-between text-xs mb-1">
+                  <div className="flex justify-between text-xs mb-1 bg-slate-100 p-1 rounded">
                       <span className="text-slate-500">Référence</span>
-                      <span className="font-mono">{data.reference}</span>
+                      <span className="font-mono font-bold">{data.reference}</span>
                   </div>
               )}
 

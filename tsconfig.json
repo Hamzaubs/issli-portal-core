@@ -1,14 +1,19 @@
 {
   "compilerOptions": {
-    "target": "ESNext",
-    "module": "ESNext",
-    "moduleResolution": "node",
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "baseUrl": ".",
     "paths": {
-      "@marine/db-internal": ["packages/db-internal/src/index.ts"],
-      "@marine/db-legal": ["packages/db-legal/src/index.ts"]
+      "@marine/db-internal": ["./packages/db-internal/src"],
+      "@marine/db-legal": ["./packages/db-legal/src"]
     },
     "strict": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
-  }
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "esModuleInterop": true,
+    "ignoreDeprecations": "6.0"
+  },
+  "exclude": ["node_modules", "dist"]
 }

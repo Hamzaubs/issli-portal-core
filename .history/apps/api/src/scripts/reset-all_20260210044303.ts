@@ -1,6 +1,6 @@
 // apps/api/src/scripts/reset-all.ts
-import { PrismaClient as PrismaClientB } from '@prisma/client-stock-b';
-import { PrismaClient as PrismaClientA } from '@prisma/client-legal';
+import { PrismaClient as PrismaClientB } from '@marine/db-internal';
+import { PrismaClient as PrismaClientA } from '@marine/db-legal';
 
 const prismaB = new PrismaClientB();
 const prismaA = new PrismaClientA();

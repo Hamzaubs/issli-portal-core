@@ -1,5 +1,5 @@
-import { PrismaClient as PrismaClientLegal } from '@prisma/client-legal';
-import { PrismaClient as PrismaClientInternal } from '@prisma/client-stock-b';
+import { PrismaClient as PrismaClientLegal } from '@marine/db-legal';
+import { PrismaClient as PrismaClientInternal } from '@marine/db-internal';
 
 const prismaLegal = new PrismaClientLegal();
 const prismaInternal = new PrismaClientInternal();

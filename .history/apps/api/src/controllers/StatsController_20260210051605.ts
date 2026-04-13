@@ -2,7 +2,7 @@
 import { Request, Response } from 'express';
 import { prismaLegal } from '@marine/db-legal';
 import { prismaInternal } from '@marine/db-internal'; 
-import { Prisma } from '@prisma/client-legal';
+import { Prisma } from '@marine/db-legal';
 // 1. IMPORT INTERNAL ENUMS
 import { MovementType } from '@prisma/client-internal';
 

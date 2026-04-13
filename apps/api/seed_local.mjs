@@ -1,4 +1,5 @@
-import { PrismaClient } from '@prisma/client-stock-b';
+// apps/api/seed.mjs
+import { PrismaClient } from '@marine/db-internal';
 import bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
@@ -6,7 +7,6 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('🌱 Generating test users for the Cloud...');
   
-  // Scramble the password "admin123"
   const hashedPassword = await bcrypt.hash('admin123', 10);
 
   const users = [
@@ -16,7 +16,6 @@ async function main() {
   ];
 
   for (const u of users) {
-    // Check if user exists to avoid errors, otherwise create them
     const exists = await prisma.user.findUnique({ where: { username: u.username } });
     if (!exists) {
       await prisma.user.create({ data: u });

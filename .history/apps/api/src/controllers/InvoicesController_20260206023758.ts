@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { prismaLegal } from '@marine/db-legal';
-import { Prisma } from '@prisma/client-legal';
+import { Prisma } from '@marine/db-legal';
 
 export const InvoicesController = {
   

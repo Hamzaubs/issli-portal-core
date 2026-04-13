@@ -1,6 +1,6 @@
 generator client {
   provider = "prisma-client-js"
-  output   = "../../../node_modules/@prisma/client-stock-b"
+  output   = "../../../node_modules/@marine/db-internal"
   engineType = "library"
 }
 

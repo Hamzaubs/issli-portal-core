@@ -1,7 +1,7 @@
 // apps/api/src/controllers/LegalReportController.ts
 import { Request, Response } from 'express';
 import { prismaLegal } from '@marine/db-legal';
-import { Prisma } from '@prisma/client-legal';
+import { Prisma } from '@marine/db-legal';
 
 // Helper: Safe Decimal Conversion
 const toDec = (val: any): Prisma.Decimal => new Prisma.Decimal(val || 0);

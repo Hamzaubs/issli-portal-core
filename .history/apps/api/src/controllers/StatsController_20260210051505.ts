@@ -2,7 +2,7 @@
 import { Request, Response } from 'express';
 import { prismaLegal } from '@marine/db-legal';
 import { prismaInternal } from '@marine/db-internal'; // Assuming you have this alias
-import { Prisma } from '@prisma/client-legal';
+import { Prisma } from '@marine/db-legal';
 
 // Helper: Safe Decimal Constructor (Handles nulls/undefined)
 const toDec = (val: any) => new Prisma.Decimal(val || 0);

@@ -1,10 +1,33 @@
-import { PrismaClient } from '@prisma/client-stock-b';
+// apps/api/seed.mjs
 import bcrypt from 'bcrypt';
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-const prisma = new PrismaClient();
+// 1. Setup paths
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// 2. Load .env from root
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+
+// 3. 🛡️ DIRECT PATH IMPORT (Bypasses ESM resolution issues)
+// This points directly to where Prisma generated your Stock B client
+import pkg from '../../node_modules/@marine/db-internal/index.js';
+const { PrismaClient } = pkg;
+
+console.log('🔌 Connecting to Local DB...');
+
+const prisma = new PrismaClient({
+  datasources: {
+    db: {
+      url: process.env.DATABASE_URL_INTERNAL
+    },
+  },
+});
 
 async function main() {
-  console.log('🌱 Generating test users for the Cloud...');
+  console.log('🌱 Generating test users for Localhost...');
   
   const hashedPassword = await bcrypt.hash('admin123', 10);
 
@@ -18,19 +41,23 @@ async function main() {
     const exists = await prisma.user.findUnique({ where: { username: u.username } });
     if (!exists) {
       await prisma.user.create({ data: u });
+      console.log(`✅ Created: ${u.username}`);
+    } else {
+      console.log(`⚠️ Skipped: ${u.username} (Already exists)`);
     }
   }
 
-  console.log('✅ SUCCESS! Your staging database now has:');
   console.log('----------------------------------------');
-  console.log('👑 Admin Portal -> User: admin_test | Pass: admin123');
-  console.log('🛒 POS Terminal -> User: pos_test   | Pass: admin123');
-  console.log('⚖️ Legal Portal -> User: legal_test | Pass: admin123');
+  console.log('✅ SUCCESS!');
   console.log('----------------------------------------');
 }
 
 main()
-  .catch((e) => console.error(e))
+  .catch((e) => {
+    console.error('❌ SEED ERROR: Ensure you ran "npx prisma generate" for Silo B first.');
+    console.error(e);
+    process.exit(1);
+  })
   .finally(async () => {
     await prisma.$disconnect();
   });

@@ -49,7 +49,6 @@ export const Dashboard = ({ user }: { user?: any }) => {
 
   const [showAnonymousConfirm, setShowAnonymousConfirm] = useState(false);
 
-  // 🛒 CART STATE (Replaces selectedProduct)
   const [cart, setCart] = useState<CartItem[]>([]);
   const [submitting, setSubmitting] = useState(false);
   
@@ -84,11 +83,10 @@ export const Dashboard = ({ user }: { user?: any }) => {
 
   const formatMAD = (amount: number) => new Intl.NumberFormat('fr-MA', { style: 'currency', currency: 'MAD' }).format(amount);
 
-  // 🛒 CART LOGIC
   const handleAddToCart = (p: ProductB) => {
     setCart(prev => {
-        const exists = prev.find(item => item.product.id === p.id);
-        if (exists) {
+        const existing = prev.find(item => item.product.id === p.id);
+        if (existing) {
             return prev.map(item => item.product.id === p.id ? { ...item, quantity: item.quantity + 1 } : item);
         }
         return [...prev, { product: p, quantity: 1 }];
@@ -109,6 +107,21 @@ export const Dashboard = ({ user }: { user?: any }) => {
     setCart(prev => prev.filter(item => item.product.id !== productId));
   };
 
+  // ✅ 🚨 ADMIN ONLY: Delete Product Controller
+  const handleDeleteProduct = async (e: React.MouseEvent, id: string, name: string) => {
+      e.stopPropagation(); // Prevents the card click from adding to cart
+      if (!window.confirm(`⚠️ SUPPRESSION DÉFINITIVE\n\nVoulez-vous vraiment supprimer le produit "${name}" ?`)) return;
+      
+      try {
+          await client.delete(`/internal/products/${id}`);
+          setRefresh(p => p + 1);
+          setCart(prev => prev.filter(item => item.product.id !== id)); // Remove from cart if present
+      } catch (err: any) {
+          // Typically fails safely if there are foreign key constraints (already used in history)
+          alert("Erreur: " + (err.response?.data?.error || "Impossible de supprimer ce produit (il est probablement lié à un historique de mouvement)."));
+      }
+  };
+
   const cartTotal = cart.reduce((sum, item) => sum + (item.product.sellingPrice * item.quantity), 0);
   
   const handleTransaction = async (bypassConfirm: boolean = false) => {
@@ -125,16 +138,25 @@ export const Dashboard = ({ user }: { user?: any }) => {
         return;
     }
 
-    const type = paymentMethod === 'QUOTE' ? 'QUOTE' : returnMode ? 'RETURN' : 'SALE_CASH';
+    let type = 'SALE_CASH';
+    if (returnMode) type = 'RETURN';
+    if (paymentMethod === 'QUOTE') type = 'QUOTE';
 
-    if (!activeClient && (type !== 'QUOTE') && !bypassConfirm) {
+    for (const item of cart) {
+        if (type === 'SALE_CASH' && item.product.quantity < item.quantity) {
+            alert(`❌ Stock Insuffisant pour ${item.product.name} !\nDisponible : ${item.product.quantity} ${getUnitLabel(item.product.measureUnit)}`);
+            return;
+        }
+    }
+
+    if (!activeClient && (type === 'SALE_CASH' || type === 'RETURN') && !bypassConfirm) {
         setShowAnonymousConfirm(true);
         return; 
     }
 
     setSubmitting(true);
     try {
-      const batchId = 'INT-' + Math.random().toString(36).substring(7).toUpperCase();
+      const batchId = 'TRX-' + Math.random().toString(36).substring(7).toUpperCase();
 
       await client.post('/internal/transactions/batch', { 
           items: cart.map(i => ({ productId: i.product.id, quantity: i.quantity, unitPrice: i.product.sellingPrice })),
@@ -146,6 +168,7 @@ export const Dashboard = ({ user }: { user?: any }) => {
       });
       
       setRefresh(prev => prev + 1);
+      
       setReceiptData({ 
           id: batchId,
           date: new Date(), 
@@ -184,7 +207,7 @@ export const Dashboard = ({ user }: { user?: any }) => {
   }
 
   return (
-    <div className="h-screen flex bg-slate-100 overflow-hidden relative font-sans">
+    <div className="h-screen flex bg-slate-100 overflow-hidden relative">
       
       {showAnonymousConfirm && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
@@ -251,7 +274,32 @@ export const Dashboard = ({ user }: { user?: any }) => {
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                     {products.filter(p => p.name.toLowerCase().includes(searchTerm.toLowerCase())).map(p => (
                         <div key={p.id} onClick={() => handleAddToCart(p)} className={`group cursor-pointer bg-white rounded-2xl p-4 border-2 transition-all hover:scale-[1.02] active:scale-95 ${cart.some(item => item.product.id === p.id) ? 'border-emerald-600 shadow-lg' : 'border-transparent shadow-sm'}`}>
-                            <div className="flex justify-between items-start mb-2"><span className="text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded uppercase">{p.internalSku}</span></div>
+                            <div className="flex justify-between items-start mb-2">
+                                <span className="text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded uppercase">{p.internalSku}</span>
+                                {/* ✅ 🚨 ADMIN ONLY: EDIT & DELETE BUTTONS */}
+                                {isAdmin && (
+                                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button 
+                                            onClick={(e) => { 
+                                                e.stopPropagation(); 
+                                                setEditingProduct(p); 
+                                                setShowProductForm(true); 
+                                            }} 
+                                            className="text-slate-400 hover:text-emerald-600 bg-slate-50 hover:bg-emerald-50 rounded p-1 transition-all"
+                                            title="Modifier Produit"
+                                        >
+                                            <Pencil size={14}/>
+                                        </button>
+                                        <button 
+                                            onClick={(e) => handleDeleteProduct(e, p.id, p.name)} 
+                                            className="text-slate-400 hover:text-red-600 bg-slate-50 hover:bg-red-50 rounded p-1 transition-all"
+                                            title="Supprimer Produit"
+                                        >
+                                            <Trash size={14}/>
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
                             <h3 className="font-bold text-slate-800 text-sm h-10 line-clamp-2">{p.name}</h3>
                             <div className="mt-4 flex justify-between items-end border-t pt-2">
                                 <div><p className="text-[9px] text-slate-400 font-bold uppercase">Stock</p><p className={`text-sm font-black ${p.quantity < 5 ? 'text-red-500' : 'text-slate-700'}`}>{p.quantity} <span className="text-[10px] font-bold text-slate-400">{getUnitLabel(p.measureUnit)}</span></p></div>
@@ -329,7 +377,7 @@ export const Dashboard = ({ user }: { user?: any }) => {
             ) : (
                 <div className="h-full flex flex-col items-center justify-center text-slate-300 opacity-80">
                     <ShoppingCart size={64} className="mb-4 opacity-50"/>
-                    <p className="font-bold uppercase tracking-widest text-xs mb-8">Panier vide</p>
+                    <p className="font-bold uppercase tracking-widest text-xs">Panier vide</p>
                 </div>
             )}
           </div>
@@ -337,13 +385,15 @@ export const Dashboard = ({ user }: { user?: any }) => {
           <div className="p-6 border-t border-slate-200">
               <button onClick={() => handleTransaction(false)} disabled={cart.length === 0 || submitting} 
                 className={`w-full py-4 text-white font-black rounded-2xl shadow-lg disabled:opacity-50 transition-all active:scale-[0.98] ${returnMode ? 'bg-red-600 hover:bg-red-700' : paymentMethod === 'QUOTE' ? 'bg-amber-500 hover:bg-amber-600 text-slate-900' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
-                  {submitting ? '...' : returnMode ? 'VALIDER RETOUR' : paymentMethod === 'QUOTE' ? 'GÉNÉRER DEVIS' : 'VALIDER TRANSACTION'}
+                  {submitting ? 'VALIDATION...' : returnMode ? 'VALIDER RETOUR' : paymentMethod === 'QUOTE' ? 'GÉNÉRER DEVIS' : 'VALIDER TRANSACTION'}
               </button>
           </div>
       </div>
 
       {showClientSelector && <ClientSelector mode="INTERNAL" onSelect={(c: any) => { setActiveClient(c); setShowClientSelector(false); }} onClose={() => setShowClientSelector(false)} />}
+      
       {showProductForm && <ProductForm initialData={editingProduct} onCancel={() => setShowProductForm(false)} onSuccess={() => { setShowProductForm(false); setRefresh(p => p+1); }} />}
+      
       {receiptData && <InternalDeliveryNote data={receiptData} onClose={() => setReceiptData(null)} />}
       {showQuoteWizard && <InternalQuoteWizard onCancel={() => setShowQuoteWizard(false)} onSuccess={() => { setShowQuoteWizard(false); setRefresh(p => p+1); }} />}
       

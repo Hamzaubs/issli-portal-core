@@ -1,7 +1,8 @@
 generator client {
-  provider = "prisma-client-js"
-  output   = "../../../node_modules/@prisma/client-stock-b"
-  engineType = "library"
+  provider      = "prisma-client-js"
+  output        = "../src/generated/client" // 🛡️ Local output bypass
+  engineType    = "library"
+  binaryTargets = ["native", "windows", "debian-openssl-1.1.x", "debian-openssl-3.0.x"]
 }
 
 datasource db {
@@ -57,7 +58,7 @@ model ClientB {
 
 model StockMovement {
   id               String   @id @default(uuid())
-  
+  batchId              String?       @map("batch_id")
   // Relationships
   productId        String   @map("product_id")
   product          ProductB @relation(fields: [productId], references: [id])
@@ -70,7 +71,9 @@ model StockMovement {
 
   // Core Data
   quantity         Int
+  returnedQuantity   Int      @default(0) @map("returned_quantity") // ✅ FIX: Added to track partial/full returns
   type             MovementType
+  
   
   // Financial Data
   amount           Decimal?       @db.Decimal(10, 2)
@@ -86,6 +89,7 @@ model StockMovement {
   createdAt        DateTime       @default(now()) @map("created_at") 
   
   @@map("movements_internal")
+  @@index([batchId]) // ⚡ Fast grouping for documents
   @@index([createdAt, type]) // ⚡ Composite index for lightning-fast Dashboard charts
   @@index([productId])
   @@index([clientId])

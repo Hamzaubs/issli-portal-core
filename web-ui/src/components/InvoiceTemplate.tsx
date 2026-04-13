@@ -1,4 +1,3 @@
-// web-ui/src/components/InvoiceTemplate.tsx
 import React from 'react';
 
 interface InvoiceTemplateProps {
@@ -25,7 +24,6 @@ export const InvoiceTemplate = React.forwardRef<HTMLDivElement, InvoiceTemplateP
 
   const formatMAD = (amount: number) => new Intl.NumberFormat('fr-MA', { style: 'currency', currency: 'MAD' }).format(amount);
 
-  // Helper to convert DB unit to display string
   const getUnitLabel = (unit?: string) => { 
       switch(unit) { 
           case 'M': return 'm'; 
@@ -34,6 +32,20 @@ export const InvoiceTemplate = React.forwardRef<HTMLDivElement, InvoiceTemplateP
           case 'UNIT': default: return 'u'; 
       } 
   };
+
+  // 🧠 THE AGGREGATION ENGINE: Merging identical items for cleaner A4 printing
+  const consolidatedItems = data.items.reduce((acc: any[], item: any) => {
+      const rate = Number(item.vatRateSnapshot !== undefined ? item.vatRateSnapshot : (item.vatRate || 0.20));
+      const price = Number(item.unitPriceHT || item.unitPrice || 0);
+      
+      const existing = acc.find(i => i.productName === item.productName && i.parsedRate === rate && i.parsedPrice === price);
+      if (existing) {
+          existing.quantity = Number(existing.quantity) + Number(item.quantity);
+      } else {
+          acc.push({ ...item, quantity: Number(item.quantity), parsedRate: rate, parsedPrice: price });
+      }
+      return acc;
+  }, []);
 
   const totalHT = Number(data.totalHT);
   const totalTTC = Number(data.totalTTC);
@@ -88,21 +100,15 @@ export const InvoiceTemplate = React.forwardRef<HTMLDivElement, InvoiceTemplateP
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-200">
-          {data.items.map((item: any, idx: number) => {
-            const rate = Number(item.vatRateSnapshot !== undefined ? item.vatRateSnapshot : (item.vatRate || 0.20));
-            const price = Number(item.unitPriceHT || item.unitPrice || 0);
-            const qty = Number(item.quantity);
-            
-            return (
+          {consolidatedItems.map((item: any, idx: number) => (
               <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
                 <td className="py-3 px-4 text-sm font-bold text-slate-700">{item.productName}</td>
-                <td className="py-3 px-4 text-center text-sm font-mono">{qty} <span className="text-[10px] text-slate-500">{getUnitLabel(item.measureUnit)}</span></td>
-                <td className="py-3 px-4 text-center text-sm font-mono">{Math.round(rate * 100)}%</td>
-                <td className="py-3 px-4 text-right text-sm font-mono">{formatMAD(price)}</td>
-                <td className="py-3 px-4 text-right text-sm font-bold">{formatMAD(qty * price)}</td>
+                <td className="py-3 px-4 text-center text-sm font-mono">{item.quantity} <span className="text-[10px] text-slate-500">{getUnitLabel(item.measureUnit)}</span></td>
+                <td className="py-3 px-4 text-center text-sm font-mono">{Math.round(item.parsedRate * 100)}%</td>
+                <td className="py-3 px-4 text-right text-sm font-mono">{formatMAD(item.parsedPrice)}</td>
+                <td className="py-3 px-4 text-right text-sm font-bold">{formatMAD(item.quantity * item.parsedPrice)}</td>
               </tr>
-            );
-          })}
+          ))}
         </tbody>
       </table>
 

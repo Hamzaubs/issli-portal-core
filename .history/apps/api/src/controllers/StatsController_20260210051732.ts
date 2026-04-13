@@ -2,7 +2,7 @@
 import { Request, Response } from 'express';
 import { prismaLegal } from '@marine/db-legal';
 import { prismaInternal } from '@marine/db-internal'; 
-import { Prisma } from '@prisma/client-legal';
+import { Prisma } from '@marine/db-legal';
 
 // Helper: Ensure we always work with Decimals for Silo A
 const toDec = (val: any): Prisma.Decimal => new Prisma.Decimal(val || 0);

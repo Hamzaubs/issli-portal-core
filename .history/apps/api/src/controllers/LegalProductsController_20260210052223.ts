@@ -1,7 +1,7 @@
 // apps/api/src/controllers/LegalProductsController.ts
 import { Request, Response } from 'express';
 import { prismaLegal } from '@marine/db-legal';
-import { Prisma } from '@prisma/client-legal';
+import { Prisma } from '@marine/db-legal';
 
 // Helper: Safe conversion for Big Data/Financials
 const toDecimal = (val: any) => new Prisma.Decimal(val || 0);

@@ -1,7 +1,8 @@
 generator client {
-  provider = "prisma-client-js"
-  output   = "../../../node_modules/@prisma/client-legal"
-  engineType = "library"
+  provider      = "prisma-client-js"
+  output        = "../src/generated/client" // 🛡️ Local output bypass
+  engineType    = "library"
+  binaryTargets = ["native", "windows", "debian-openssl-1.1.x", "debian-openssl-3.0.x"]
 }
 
 datasource db {

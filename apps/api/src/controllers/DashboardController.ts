@@ -1,4 +1,3 @@
-// apps/api/src/controllers/DashboardController.ts
 import { Request, Response } from 'express';
 import { prismaInternal, MovementType, Prisma } from '@marine/db-internal'; 
 import { prismaLegal } from '@marine/db-legal';
@@ -17,6 +16,13 @@ const normalize = (str: string | null | undefined) => {
     return str.toString().trim().replace(/[\s\-\.]+/g, '').toLowerCase();
 };
 
+interface LegalClientMatch {
+    id: string;
+    name: string;
+    ice: string | null;
+    phone: string | null;
+}
+
 export const DashboardController = {
 
   // =========================================
@@ -33,10 +39,13 @@ export const DashboardController = {
               prismaInternal.productB.findMany({ where: { quantity: { lte: 5 } }, select: { id: true, name: true, quantity: true }, take: 10 }),
               prismaInternal.clientB.aggregate({ _sum: { balance: true } }),
               prismaInternal.stockMovement.findMany({
-                  where: { createdAt: { gte: startDate, lte: endDate } },
+                  where: { 
+                      createdAt: { gte: startDate, lte: endDate },
+                      // 🛡️ CRITICAL FIX: Exclude Legacy Debt from inflating Internal Volume D'Achats
+                      snapshotProductName: { not: { contains: '[REPRISE DE DETTE]' } }
+                  },
                   select: { createdAt: true, type: true, amount: true, quantity: true, snapshotPurchaseCost: true, snapshotProductName: true, paymentMethod: true }
               }),
-              // ✅ FIXED: Added `phone: true` to the selection
               prismaInternal.clientB.findMany({ orderBy: { balance: 'desc' }, where: { balance: { gt: 0 } }, take: 5, select: { name: true, phone: true, balance: true } })
           ]);
 
@@ -49,7 +58,8 @@ export const DashboardController = {
               }
           });
 
-          const periodBalance = toNumber(debtAgg._sum?.balance);
+          // 🛡️ Math.max ensures global debt never reads as a negative number on the dashboard
+          const periodBalance = Math.max(0, toNumber(debtAgg._sum?.balance));
 
           let netRevenue = 0; let totalCost = 0; let totalRefunds = 0; let collectedCash = 0; let totalQuotes = 0;
           const monthlyStats = Array(12).fill(0).map(() => ({ revenue: 0, collected: 0, refunds: 0, quotes: 0 }));
@@ -71,7 +81,7 @@ export const DashboardController = {
                   totalRefunds += amt;
                   totalCost -= cost;
                   monthlyStats[month].refunds += amt;
-                  if (m.paymentMethod === 'CASH') { collectedCash -= amt; monthlyStats[month].collected -= amt; }
+                  if (m.paymentMethod === 'CASH' || m.paymentMethod === 'ESPECES') { collectedCash -= amt; monthlyStats[month].collected -= amt; }
               } else if (t === 'PAYMENT') {
                   collectedCash += amt;
                   monthlyStats[month].collected += amt;
@@ -102,8 +112,7 @@ export const DashboardController = {
               charts: { 
                   monthly: monthlyStats, 
                   topProducts, 
-                  // ✅ FIXED: Added `phone` to the JSON mapping
-                  topClients: topClients.map(c => ({ name: c.name, phone: c.phone, total: toNumber(c.balance) })) 
+                  topClients: topClients.map(c => ({ name: c.name, phone: c.phone, total: Math.max(0, toNumber(c.balance)) })) 
               },
               alerts
           });
@@ -146,24 +155,49 @@ export const DashboardController = {
     } catch (e) { res.status(500).json({ error: "Erreur mise à jour" }); }
   },
 
+  // 🛡️ ERP SAFETY CHECK INJECTED: Blocks 500 errors when attempting to delete products with history
   deleteProduct: async (req: Request, res: Response) => {
       try {
           const { id } = req.params;
           const count = await prismaInternal.stockMovement.count({ where: { productId: id } });
-          if (count > 0) return res.status(400).json({ error: "Impossible de supprimer : Produit a un historique." });
+          
+          if (count > 0) {
+              return res.status(400).json({ 
+                  error: `Refusé : Ce produit est lié à ${count} transaction(s) dans l'historique. Pour préserver la comptabilité, renommez-le (ex: [OBSOLÈTE]) et mettez son stock à 0 au lieu de le supprimer.` 
+              });
+          }
+          
           await prismaInternal.productB.delete({ where: { id } });
           res.json({ success: true });
-      } catch (e) { res.status(500).json({ error: "Erreur suppression" }); }
+      } catch (e) { 
+          console.error("Delete Product Error:", e);
+          res.status(500).json({ error: "Erreur suppression" }); 
+      }
   },
 
   getClients: async (req: Request, res: Response) => {
       try {
           const clientsB = await prismaInternal.clientB.findMany({ orderBy: { updatedAt: 'desc' }, take: 100 });
           const clientsA = await prismaLegal.clientA.findMany({ select: { id: true, name: true, ice: true, phone: true } });
+          
           const enhancedClients = clientsB.map(cb => {
-              const b_ice = normalize(cb.ice); const b_phone = normalize(cb.phone); const b_name = normalize(cb.name);
-              const match = clientsA.find(ca => (b_ice.length > 3 && b_ice === normalize(ca.ice)) || (b_phone.length > 6 && b_phone === normalize(ca.phone)) || (b_name.length > 3 && b_name === normalize(ca.name)));
-              return { ...cb, balance: toNumber(cb.balance), totalSpent: toNumber(cb.totalSpent), linkedLegalId: match ? match.id : null, linkedLegalName: match ? match.name : null };
+              const b_ice = normalize(cb.ice); 
+              const b_phone = normalize(cb.phone); 
+              const b_name = normalize(cb.name);
+
+              const match = clientsA.find((ca: LegalClientMatch) => 
+                (b_ice.length > 3 && b_ice === normalize(ca.ice)) || 
+                (b_phone.length > 6 && b_phone === normalize(ca.phone)) || 
+                (b_name.length > 3 && b_name === normalize(ca.name))
+              );
+
+              return { 
+                ...cb, 
+                balance: toNumber(cb.balance), 
+                totalSpent: toNumber(cb.totalSpent), 
+                linkedLegalId: match ? match.id : null, 
+                linkedLegalName: match ? match.name : null 
+              };
           });
           res.json(enhancedClients);
       } catch (e) { res.status(500).json({ error: "Erreur chargement clients" }); }
@@ -225,9 +259,36 @@ export const DashboardController = {
 
   getHistory: async (req: Request, res: Response) => {
     try {
-        const movements = await prismaInternal.stockMovement.findMany({ take: 50, orderBy: { createdAt: 'desc' }, include: { product: true, client: true } });
-        const formatted = movements.map(m => ({ id: m.id, type: m.type, productName: m.snapshotProductName || m.product?.name || "Inconnu", clientName: m.client?.name || "-", quantity: toNumber(m.quantity), amount: toNumber(m.amount), date: m.createdAt }));
-        res.json(formatted);
+        const movements = await prismaInternal.stockMovement.findMany({ 
+            take: 100, 
+            orderBy: { createdAt: 'desc' }, 
+            include: { product: true, client: true } 
+        });
+
+        const grouped = movements.reduce((acc: any[], m) => {
+            const groupKey = m.batchId || m.id;
+            let doc = acc.find(d => d.id === groupKey);
+
+            if (!doc) {
+                acc.push({
+                    id: groupKey,
+                    displayId: m.id.substring(0,8).toUpperCase(),
+                    type: m.type,
+                    productName: m.snapshotProductName || m.product?.name || "Inconnu",
+                    clientName: m.client?.name || "-",
+                    quantity: toNumber(m.quantity),
+                    amount: toNumber(m.amount),
+                    date: m.createdAt,
+                    itemCount: 1
+                });
+            } else {
+                doc.amount += toNumber(m.amount);
+                doc.itemCount += 1;
+            }
+            return acc;
+        }, []).slice(0, 50);
+
+        res.json(grouped);
     } catch (error) { res.status(500).json({ error: "Erreur historique" }); }
   },
 

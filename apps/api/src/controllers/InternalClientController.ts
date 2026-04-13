@@ -1,8 +1,6 @@
-// apps/api/src/controllers/InternalClientController.ts
 import { Request, Response } from 'express';
 import { prismaInternal, Prisma, MovementType } from '@marine/db-internal';
 
-// 🛡️ Helper: Precision Conversion
 const toNumber = (val: any) => {
     if (!val) return 0;
     if (typeof val === 'object' && 'toNumber' in val) return val.toNumber();
@@ -11,7 +9,6 @@ const toNumber = (val: any) => {
 
 export const InternalClientController = {
 
-  // 🔍 BIG DATA SAFE SEARCH
   searchClients: async (req: Request, res: Response) => {
     try {
       const { q = '', page = 1, limit = 12, mode = 'ALL' } = req.query;
@@ -50,7 +47,18 @@ export const InternalClientController = {
       const { id } = req.params;
       const client = await prismaInternal.clientB.findUnique({ where: { id }, include: { _count: { select: { movements: true } } } });
       if (!client) return res.status(404).json({ error: "Client introuvable" });
-      const stats = await prismaInternal.stockMovement.aggregate({ where: { clientId: id, type: { in: ['SALE_CASH', 'SALE_CREDIT', 'RETURN'] } }, _sum: { amount: true }, _max: { createdAt: true } });
+
+      // 🛡️ THE SHIELD: Calculate Volume D'Achats strictly from REAL sales, entirely ignoring Legacy Debt injections.
+      const stats = await prismaInternal.stockMovement.aggregate({ 
+          where: { 
+              clientId: id, 
+              type: { in: ['SALE_CASH', 'SALE_CREDIT', 'RETURN'] },
+              snapshotProductName: { not: { contains: '[REPRISE DE DETTE]' } } // <--- Blocks Debt from inflating Sales
+          }, 
+          _sum: { amount: true }, 
+          _max: { createdAt: true } 
+      });
+
       res.json({ profile: { ...client, balance: client.balance.toNumber() }, stats: { totalSpent: stats._sum.amount?.toNumber() || 0, lastPurchase: stats._max.createdAt, transactionCount: client._count.movements } });
     } catch (e) { res.status(500).json({ error: "Erreur profil" }); }
   },
@@ -78,8 +86,9 @@ export const InternalClientController = {
         return {
             id: m.id, date: m.createdAt, type: m.type, productName: finalName, 
             sku: m.product?.internalSku || '-', quantity: m.quantity, measureUnit: m.product?.measureUnit || 'UNIT',
-            amount: Math.abs(m.amount?.toNumber() ?? 0), // Use absolute values for frontend consistency
+            amount: Math.abs(m.amount?.toNumber() ?? 0), 
             paid: m.paidAmount?.toNumber() ?? 0, 
+            returnedQuantity: m.returnedQuantity || 0, 
             paymentMethod: m.paymentMethod, paymentRef: m.paymentRef || null
         };
       });
@@ -87,7 +96,6 @@ export const InternalClientController = {
     } catch (e) { res.status(500).json({ error: "Erreur historique" }); }
   },
 
-  // 📜 LEDGER ENGINE (UPGRADED: Math Safe + Same-Millisecond Sorting)
   getClientStatement: async (req: Request, res: Response) => {
       try {
           const { id } = req.params;
@@ -98,7 +106,6 @@ export const InternalClientController = {
               where: { clientId: id, type: { in: [MovementType.SALE_CASH, MovementType.SALE_CREDIT, MovementType.RETURN, MovementType.PAYMENT] } }
           });
 
-          // 1. Structure the Data for Sorting
           const history = allMovements.map(m => {
               const amount = toNumber(m.amount);
               const isDebit = m.type === 'SALE_CASH' || m.type === 'SALE_CREDIT';
@@ -106,36 +113,31 @@ export const InternalClientController = {
               const debit = isDebit ? Math.abs(amount) : 0;
               const credit = !isDebit ? Math.abs(amount) : 0;
 
+              // Visually separate Legacy Debt in the PDF statement
+              const isLegacyDebt = m.snapshotProductName?.includes('[REPRISE DE DETTE]');
+
               return {
                   date: m.createdAt,
-                  type: m.type === 'PAYMENT' ? 'PAIEMENT' : m.type === 'RETURN' ? 'RETOUR' : 'VENTE',
+                  type: isLegacyDebt ? 'REPRISE DETTE' : (m.type === 'PAYMENT' ? 'PAIEMENT' : m.type === 'RETURN' ? 'RETOUR' : 'VENTE'),
                   ref: m.paymentRef || m.snapshotProductName || 'Transaction',
                   debit,
                   credit
               };
           });
 
-          // 2. Sort Chronologically & Protect against Same-Millisecond glitches
           history.sort((a, b) => {
               const timeA = new Date(a.date).getTime();
               const timeB = new Date(b.date).getTime();
-              
-              if (timeA === timeB) {
-                  // If exact same millisecond, Debits (Sales) ALWAYS appear before Credits (Payments)
-                  return b.debit - a.debit;
-              }
+              if (timeA === timeB) return b.debit - a.debit;
               return timeA - timeB;
           });
 
-          // 3. Compute mathematically safe Running Balance
           let runningBalance = 0;
           const statement = history.map(item => {
               const rBalanceCents = Math.round(runningBalance * 100);
               const debitCents = Math.round(item.debit * 100);
               const creditCents = Math.round(item.credit * 100);
-              
               runningBalance = (rBalanceCents + debitCents - creditCents) / 100;
-
               return { ...item, balance: runningBalance };
           });
 
@@ -143,7 +145,6 @@ export const InternalClientController = {
       } catch (error) { res.status(500).json({ error: "Erreur génération relevé" }); }
   },
 
-  // 💸 FIFO PAYMENT ENGINE (Prisma Decimal Validated)
   registerPayment: async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
@@ -154,15 +155,12 @@ export const InternalClientController = {
       if (!amount || payAmount.lte(0)) return res.status(400).json({ error: "Montant invalide" });
 
       await prismaInternal.$transaction(async (tx) => {
-          // 🛡️ SECURITY: Verify User ID exists in Silo B to prevent FKEY violation
           const userExists = await tx.user.findUnique({ where: { id: rawUserId } });
           const safeUserId = userExists ? rawUserId : null;
 
-          // 🛡️ DB PROTECTION: Mandatory product for movements
           const anyProduct = await tx.productB.findFirst();
           if (!anyProduct) throw new Error("Veuillez créer au moins un produit pour initialiser les mouvements.");
 
-          // 1. Create Payment Trace
           await tx.stockMovement.create({
               data: { 
                   type: MovementType.PAYMENT, clientId: id, userId: safeUserId,
@@ -172,10 +170,8 @@ export const InternalClientController = {
               }
           });
 
-          // 2. Reduce Global Balance Safely
           await tx.clientB.update({ where: { id }, data: { balance: { decrement: payAmount } } });
 
-          // 3. FIFO / Target Allocation
           if (movementId) {
               await tx.stockMovement.update({ where: { id: movementId }, data: { paidAmount: { increment: payAmount } } });
           } else {
@@ -190,7 +186,14 @@ export const InternalClientController = {
                   
                   const ticketAmount = ticket.amount || new Prisma.Decimal(0);
                   const ticketPaid = ticket.paidAmount || new Prisma.Decimal(0);
-                  const due = ticketAmount.sub(ticketPaid);
+                  const returnedQty = ticket.returnedQuantity || 0;
+                  const qty = ticket.quantity || 1;
+                  
+                  const returnedRatio = new Prisma.Decimal(returnedQty).div(qty);
+                  const returnedValue = ticketAmount.mul(returnedRatio);
+                  
+                  const effectiveAmount = ticketAmount.sub(returnedValue);
+                  const due = effectiveAmount.sub(ticketPaid);
                   
                   if (due.gt(0)) {
                       const toApply = remaining.gte(due) ? due : remaining;
@@ -204,7 +207,6 @@ export const InternalClientController = {
     } catch (e: any) { res.status(500).json({ error: e.message || "Erreur paiement" }); }
   },
 
-  // 🛡️ LONG-TERM SAFE CRUD
   createClient: async (req: Request, res: Response) => {
     try {
       const { name, phone, ice, address } = req.body;
@@ -248,9 +250,7 @@ export const InternalClientController = {
       } catch (e) { res.status(500).json({ error: "Erreur suppression" }); } 
   },
 
-  // =========================================================================
-  // 🏛️ LEGACY DEBT IMPORT (SILO B)
-  // =========================================================================
+  // 🛡️ THE DECOUPLING FIX
   importLegacyDebt: async (req: Request, res: Response) => {
       try {
           const { id } = req.params; 
@@ -269,8 +269,6 @@ export const InternalClientController = {
               const userExists = rawUserId ? await tx.user.findUnique({ where: { id: rawUserId } }) : null;
               const safeUserId = userExists ? rawUserId : null;
 
-              // 🛡️ GHOST ASSIGNMENT: We need a valid product ID for the foreign key, 
-              // but we will set quantity to 0 so it never touches actual stock.
               const anyProduct = await tx.productB.findFirst();
               if (!anyProduct) throw new Error("Veuillez créer au moins un produit dans le système avant d'importer une dette.");
 
@@ -280,7 +278,7 @@ export const InternalClientController = {
                       clientId: id,
                       userId: safeUserId,
                       productId: anyProduct.id,
-                      quantity: 0, // 🛑 CRITICAL: 0 Stock Impact
+                      quantity: 0, 
                       amount: debtAmount,
                       paidAmount: new Prisma.Decimal(0),
                       paymentMethod: 'CREDIT',
@@ -288,16 +286,16 @@ export const InternalClientController = {
                       snapshotProductName: `[REPRISE DE DETTE] ${note || 'Solde Antérieur'}`,
                       snapshotPurchaseCost: new Prisma.Decimal(0),
                       snapshotSellingPrice: debtAmount,
-                      createdAt: movementDate // 📅 Backdated to protect analytics
+                      createdAt: movementDate 
                   }
               });
 
-              // Apply the debt to the client's global ledger
+              // 🚨 FIX: We ONLY increment the Balance (Debt). 
+              // We explicitly DO NOT touch totalSpent so it doesn't inflate Volume d'Achats.
               await tx.clientB.update({
                   where: { id },
                   data: {
-                      balance: { increment: debtAmount },
-                      totalSpent: { increment: debtAmount }
+                      balance: { increment: debtAmount }
                   }
               });
           });

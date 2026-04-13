@@ -1,8 +1,7 @@
-// apps/api/src/controllers/InternalController.ts
 import { Request, Response } from 'express';
 import { prismaInternal, MovementType, Prisma } from '@marine/db-internal';
+import { v4 as uuidv4 } from 'uuid';
 
-// 🛡️ MAINTAINED: Your original safety helper
 const safeDecimal = (val: any): Prisma.Decimal => {
     if (!val) return new Prisma.Decimal(0);
     return new Prisma.Decimal(val.toString());
@@ -67,14 +66,27 @@ export const InternalController = {
   deleteProduct: async (req: Request, res: Response) => {
       try {
           const { id } = req.params;
+
+          // 🛡️ ERP SAFETY CHECK
+          const historyCount = await prismaInternal.stockMovement.count({
+              where: { productId: id }
+          });
+
+          if (historyCount > 0) {
+              return res.status(400).json({ 
+                  error: `Refusé : Ce produit est lié à ${historyCount} transaction(s) dans l'historique. Pour préserver la comptabilité, renommez-le (ex: [OBSOLÈTE]) et mettez son stock à 0 au lieu de le supprimer.` 
+              });
+          }
+
           await prismaInternal.productB.delete({ where: { id } });
           res.json({ success: true });
-      } catch (e) { res.status(500).json({ error: "Erreur suppression" }); }
+          
+      } catch (e: any) { 
+          console.error("Delete Product Error:", e);
+          res.status(500).json({ error: "Erreur serveur lors de la suppression." }); 
+      }
   },
 
-  // ====================================================
-  // 📥 BATCH IMPORT (SILO B) - ACID COMPLIANT
-  // ====================================================
   importBatchProducts: async (req: Request, res: Response) => {
       try {
           const { products } = req.body;
@@ -82,12 +94,10 @@ export const InternalController = {
               return res.status(400).json({ error: "Données invalides ou vides." });
           }
 
-          // 🛡️ Map all products into an array of Prisma Promises
           const upsertOperations = products.map((item: any) => {
               if (!item.internalSku || !item.name) {
                   throw new Error(`Produit sans nom ou SKU détecté.`);
               }
-
               return prismaInternal.productB.upsert({
                   where: { internalSku: item.internalSku },
                   update: {
@@ -108,13 +118,10 @@ export const InternalController = {
               });
           });
 
-          // 🛡️ Execute ALL promises in a strict ACID Transaction
           await prismaInternal.$transaction(upsertOperations);
-
           res.json({ success: products.length, message: "Transaction ACID réussie." });
 
       } catch (e: any) {
-          console.error("Erreur Transaction Batch Internal:", e);
           res.status(400).json({ 
               error: e.message || "Erreur de format de données. L'importation entière a été annulée par sécurité." 
           });
@@ -122,7 +129,7 @@ export const InternalController = {
   },
 
   // ====================================================
-  // 💰 2. TRANSACTION ENGINE (Atomic & Big Data Safe)
+  // 💰 2. TRANSACTION ENGINE
   // ====================================================
   
   getTransactions: async (req: Request, res: Response) => {
@@ -155,36 +162,58 @@ export const InternalController = {
               }
           }
 
-          const [totalCount, movements] = await Promise.all([
-              prismaInternal.stockMovement.count({ where }),
-              prismaInternal.stockMovement.findMany({
-                  where, skip, take: limit, orderBy: { createdAt: 'desc' },
-                  include: {
-                      product: { select: { name: true, internalSku: true, measureUnit: true } },
-                      client: { select: { name: true } },
-                      user: { select: { username: true } }
-                  }
-              })
-          ]);
+          const movements = await prismaInternal.stockMovement.findMany({
+              where,
+              orderBy: { createdAt: 'desc' },
+              include: {
+                  product: { select: { name: true, internalSku: true, measureUnit: true } },
+                  client: { select: { name: true } },
+                  user: { select: { username: true } }
+              }
+          });
 
-          const safeMovements = movements.map(m => ({
-              id: m.id,
-              type: m.type,
-              productName: m.snapshotProductName || m.product?.name || 'Produit Supprimé',
-              productSku: m.product?.internalSku || '-',
-              clientName: m.client?.name || '-',
-              quantity: m.quantity,
-              measureUnit: m.product?.measureUnit || 'U',
-              amount: m.amount ? m.amount.toNumber() : 0,
-              paid: m.paidAmount ? m.paidAmount.toNumber() : 0, 
-              date: m.createdAt,
-              paymentMethod: m.paymentMethod,
-              paymentRef: m.paymentRef,
-              userName: m.user?.username
-          }));
+          const grouped = movements.reduce((acc: any[], m) => {
+              const groupKey = m.batchId || m.id; 
+              let doc = acc.find(d => d.groupId === groupKey);
+
+              const itemData = {
+                  id: m.id,
+                  productName: m.snapshotProductName || m.product?.name || 'Produit Supprimé',
+                  sku: m.product?.internalSku || '-',
+                  quantity: m.quantity,
+                  returnedQuantity: m.returnedQuantity || 0,
+                  measureUnit: m.product?.measureUnit || 'U',
+                  unitPrice: m.snapshotSellingPrice ? m.snapshotSellingPrice.toNumber() : 0,
+                  total: m.amount ? m.amount.toNumber() : 0
+              };
+
+              if (!doc) {
+                  acc.push({
+                      groupId: groupKey,
+                      id: m.id.substring(0, 8).toUpperCase(),
+                      type: m.type,
+                      date: m.createdAt,
+                      clientName: m.client?.name || '-',
+                      paymentMethod: m.paymentMethod,
+                      paymentRef: m.paymentRef,
+                      userName: m.user?.username,
+                      items: [itemData],
+                      totalAmount: itemData.total,
+                      paid: m.paidAmount ? m.paidAmount.toNumber() : 0
+                  });
+              } else {
+                  doc.items.push(itemData);
+                  doc.totalAmount += itemData.total;
+                  doc.paid += (m.paidAmount ? m.paidAmount.toNumber() : 0);
+              }
+              return acc;
+          }, []);
+
+          const totalCount = grouped.length;
+          const paginatedData = grouped.slice(skip, skip + limit);
 
           res.json({
-              data: safeMovements,
+              data: paginatedData,
               meta: { total: totalCount, page, limit, totalPages: Math.ceil(totalCount / limit) }
           });
       } catch (e) { res.status(500).json({ error: "Erreur chargement historique" }); }
@@ -197,9 +226,7 @@ export const InternalController = {
 
       if (!productId || !quantity || !type) return res.status(400).json({ error: "Données incomplètes" });
       
-      // ✅ FIX: Use parseFloat to support decimals (1.5 kg, 2.5 meters)
       const qtyNum = parseFloat(quantity);
-      
       if (isNaN(qtyNum) || qtyNum === 0) return res.status(400).json({ error: "Quantité invalide" });
       if (qtyNum < 0 && type !== 'ADJUSTMENT') return res.status(400).json({ error: "Quantité négative interdite pour ce type d'opération" });
 
@@ -211,7 +238,6 @@ export const InternalController = {
           if (!product) throw new Error("Produit introuvable");
 
           const isAdjustment = type === 'ADJUSTMENT';
-          
           const totalAmount = isAdjustment ? new Prisma.Decimal(0) : product.sellingPrice.mul(Math.abs(qtyNum)); 
           let newStockLevel = product.quantity;
 
@@ -250,10 +276,7 @@ export const InternalController = {
               });
               newStockLevel = updatedProduct.quantity;
 
-              // ✅ FIX: Strict Return Math. Do not force negative balances.
               if (type === 'RETURN' && clientId) {
-                  // If they return an item, it reduces their total spent.
-                  // We ONLY decrement debt if the original sale was a credit. Handled by voidTransaction properly now.
                   await tx.clientB.update({ 
                       where: { id: clientId }, data: { totalSpent: { decrement: totalAmount } } 
                   });
@@ -261,7 +284,6 @@ export const InternalController = {
           }
 
           const financialImpact = (type === 'RETURN') ? totalAmount.negated() : totalAmount;
-          
           let snapshotName = product.name;
           if (isAdjustment) {
               snapshotName = qtyNum < 0 ? `PERTE/CASSE: ${product.name}` : `SURPLUS: ${product.name}`;
@@ -294,84 +316,69 @@ export const InternalController = {
 
       if (!items || !Array.isArray(items) || items.length === 0) return res.status(400).json({ error: "Panier vide" });
 
+      const ticketId = `TKT-${Date.now().toString().slice(-6)}`;
+      const batchUuid = uuidv4(); 
+
       await prismaInternal.$transaction(async (tx) => {
           const userExists = rawUserId ? await tx.user.findUnique({ where: { id: rawUserId } }) : null;
           const safeUserId = userExists ? rawUserId : null;
-
           const timestamp = new Date();
-          let globalCartTotal = new Prisma.Decimal(0);
-          const isCredit = paymentMethod === 'CREDIT' || type === 'SALE_CREDIT';
+          
+          let batchTotal = new Prisma.Decimal(0);
 
           for (const item of items) {
               const product = await tx.productB.findUnique({ where: { id: item.productId } });
               if (!product) throw new Error(`Produit introuvable`);
 
-              // ✅ FIX: Use parseFloat to support decimals (1.5 kg, 2.5 meters)
               const qty = parseFloat(item.quantity);
               if (isNaN(qty) || qty <= 0) continue;
 
               const unitPrice = new Prisma.Decimal(item.unitPrice || product.sellingPrice);
               const totalLine = unitPrice.mul(qty);
-              const initialPaid = isCredit ? new Prisma.Decimal(0) : totalLine;
-              globalCartTotal = globalCartTotal.add(totalLine);
+              batchTotal = batchTotal.add(totalLine);
 
-              if (type === 'QUOTE') {
-                 await tx.stockMovement.create({
-                    data: {
-                       productId: item.productId, userId: safeUserId, clientId, quantity: qty, type: MovementType.QUOTE,
-                       amount: totalLine, paidAmount: new Prisma.Decimal(0),
-                       snapshotPurchaseCost: product.purchaseCost, snapshotSellingPrice: unitPrice,
-                       snapshotProductName: product.name, createdAt: timestamp 
-                    }
-                 });
-              } 
-              else if (type === 'SALE_CASH' || type === 'SALE_CREDIT') {
-                  const updatedP = await tx.productB.update({ where: { id: item.productId }, data: { quantity: { decrement: qty } } });
-                  if (updatedP.quantity < 0) throw new Error(`Stock insuffisant: ${product.name}`);
-                  
-                  await tx.stockMovement.create({
-                      data: {
-                          productId: item.productId, userId: safeUserId, clientId, quantity: qty, type: type as MovementType,
-                          paymentMethod: paymentMethod || 'CASH', paymentRef, 
-                          amount: totalLine, paidAmount: initialPaid, 
-                          snapshotPurchaseCost: product.purchaseCost, snapshotSellingPrice: unitPrice,
-                          snapshotProductName: product.name, createdAt: timestamp 
-                      }
-                  });
-              }
-              else if (type === 'RETURN') {
-                  await tx.productB.update({ where: { id: item.productId }, data: { quantity: { increment: qty } } });
-                  await tx.stockMovement.create({
-                      data: {
-                          productId: item.productId, userId: safeUserId, clientId, quantity: qty, type: MovementType.RETURN,
-                          paymentMethod: paymentMethod || 'CASH', paymentRef, 
-                          amount: totalLine.negated(), paidAmount: totalLine.negated(), 
-                          snapshotPurchaseCost: product.purchaseCost, snapshotSellingPrice: unitPrice,
-                          snapshotProductName: product.name, createdAt: timestamp 
-                      }
-                  });
+              await tx.stockMovement.create({
+                  data: {
+                      batchId: batchUuid, 
+                      productId: item.productId, 
+                      userId: safeUserId, 
+                      clientId, 
+                      quantity: qty, 
+                      type: type as MovementType,
+                      paymentMethod: paymentMethod || 'CASH', 
+                      paymentRef: paymentRef || ticketId, 
+                      amount: type === 'RETURN' ? totalLine.negated() : totalLine, 
+                      paidAmount: type === 'RETURN' ? totalLine.negated() : (paymentMethod === 'CREDIT' ? 0 : totalLine), 
+                      snapshotPurchaseCost: product.purchaseCost, 
+                      snapshotSellingPrice: unitPrice,
+                      snapshotProductName: product.name, 
+                      createdAt: timestamp 
+                  }
+              });
+
+              if (type !== 'QUOTE') {
+                const multiplier = (type === 'SALE_CASH' || type === 'SALE_CREDIT') ? -1 : 1;
+                await tx.productB.update({ where: { id: item.productId }, data: { quantity: { increment: qty * multiplier } } });
               }
           }
 
-          if (clientId && type !== 'QUOTE' && !globalCartTotal.isZero()) {
-              if (type === 'SALE_CASH' || type === 'SALE_CREDIT') {
-                  const debtInc = isCredit ? globalCartTotal : new Prisma.Decimal(0);
-                  await tx.clientB.update({ where: { id: clientId }, data: { totalSpent: { increment: globalCartTotal }, balance: { increment: debtInc } } });
-              } 
-              // ✅ FIX: Removed the global balance decrement from basic batch return. 
-              // Returning an item does not automatically wipe away global debt unless it is an explicit credit note refund.
-              else if (type === 'RETURN') {
-                  await tx.clientB.update({ where: { id: clientId }, data: { totalSpent: { decrement: globalCartTotal } } });
+          if (clientId && type !== 'QUOTE') {
+              if (type === 'SALE_CREDIT' || (type === 'SALE_CASH' && paymentMethod === 'CREDIT')) {
+                  await tx.clientB.update({ where: { id: clientId }, data: { totalSpent: { increment: batchTotal }, balance: { increment: batchTotal } } });
+              } else if (type === 'SALE_CASH') {
+                  await tx.clientB.update({ where: { id: clientId }, data: { totalSpent: { increment: batchTotal } } });
+              } else if (type === 'RETURN') {
+                  await tx.clientB.update({ where: { id: clientId }, data: { totalSpent: { decrement: batchTotal } } });
               }
           }
       });
 
-      res.json({ success: true, itemCount: items.length });
-    } catch (e: any) { res.status(400).json({ error: e.message || "Erreur enregistrement" }); }
+      res.json({ success: true, ticketId });
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
   },
 
   // =========================================================================
-  // 🛑 UPGRADED VOID PROTOCOL (PARTIAL RETURNS & DEVIS SHIELD)
+  // 🛑 UPGRADED VOID PROTOCOL (PERFECT ACCOUNTING MATH)
   // =========================================================================
   voidTransaction: async (req: Request, res: Response) => {
     try {
@@ -390,8 +397,12 @@ export const InternalController = {
 
           const safeUserId = rawUserId ? (await tx.user.findUnique({ where: { id: rawUserId } }) ? rawUserId : null) : null;
 
-          const qtyToReverse = returnQty ? Number(returnQty) : original.quantity;
-          if (qtyToReverse <= 0 || qtyToReverse > original.quantity) throw new Error("Quantité invalide pour ce retour");
+          const qtyToReverse = returnQty ? Number(returnQty) : (original.quantity - original.returnedQuantity);
+          
+          if (qtyToReverse <= 0) throw new Error("Cet article a déjà été entièrement retourné.");
+          if ((original.returnedQuantity + qtyToReverse) > original.quantity) {
+              throw new Error("Quantité invalide: dépasse le stock initial de la transaction.");
+          }
 
           let reverseType: MovementType;
           let stockMultiplier: number; 
@@ -408,9 +419,25 @@ export const InternalController = {
           const reverseAmount = unitPrice.mul(qtyToReverse).negated();
           const absoluteAmount = reverseAmount.abs();
 
-          // ✅ FIX: Determine how much debt is actually owed vs paid on this specific item
-          const originalPaidRatio = original.amount && !original.amount.isZero() ? (original.paidAmount || new Prisma.Decimal(0)).div(original.amount) : new Prisma.Decimal(1);
-          const debtReduction = absoluteAmount.mul(new Prisma.Decimal(1).sub(originalPaidRatio));
+          // ✅ 🚨 THE ULTIMATE MATH FIX: EXACT DUE WATERFALL
+          let debtReduction = new Prisma.Decimal(0);
+          
+          const itemTotal = original.amount || new Prisma.Decimal(0);
+          const itemPaid = original.paidAmount || new Prisma.Decimal(0);
+          const previouslyReturnedValue = unitPrice.mul(original.returnedQuantity || 0);
+          
+          // Exactly how much debt is currently owed on THIS SPECIFIC line item?
+          const currentDue = itemTotal.sub(previouslyReturnedValue).sub(itemPaid);
+          
+          if (currentDue.gt(0)) {
+              // The debt can only be reduced by what is actually owed, up to the value of this return.
+              debtReduction = Prisma.Decimal.max(0, Prisma.Decimal.min(currentDue, absoluteAmount));
+          }
+
+          await tx.stockMovement.update({
+              where: { id: original.id },
+              data: { returnedQuantity: { increment: qtyToReverse } }
+          });
 
           await tx.stockMovement.create({
               data: {
@@ -428,14 +455,23 @@ export const InternalController = {
           });
           if (updatedP.quantity < 0) throw new Error("Stock négatif.");
 
-          // ✅ FIX: Accurate Client Debt & Spent reduction
           if (original.clientId && !absoluteAmount.isZero()) {
               if (original.type === 'SALE_CREDIT' || (original.type === 'SALE_CASH' && original.paymentMethod === 'CREDIT')) {
-                  await tx.clientB.update({ where: { id: original.clientId }, data: { totalSpent: { decrement: absoluteAmount }, balance: { decrement: debtReduction } } });
+                  await tx.clientB.update({ 
+                      where: { id: original.clientId }, 
+                      // ✅ Wipes Volume D'Achat by full return value, but Debt ONLY by exact amount still owed
+                      data: { totalSpent: { decrement: absoluteAmount }, balance: { decrement: debtReduction } } 
+                  });
               } else if (original.type === 'SALE_CASH') {
-                  await tx.clientB.update({ where: { id: original.clientId }, data: { totalSpent: { decrement: absoluteAmount } } });
+                  await tx.clientB.update({ 
+                      where: { id: original.clientId }, 
+                      data: { totalSpent: { decrement: absoluteAmount } } 
+                  });
               } else if (original.type === 'RETURN') {
-                  await tx.clientB.update({ where: { id: original.clientId }, data: { totalSpent: { increment: absoluteAmount }, balance: { increment: absoluteAmount } } });
+                  await tx.clientB.update({ 
+                      where: { id: original.clientId }, 
+                      data: { totalSpent: { increment: absoluteAmount }, balance: { increment: debtReduction } } 
+                  });
               }
           }
       });
@@ -445,7 +481,7 @@ export const InternalController = {
   },
 
   // =========================================================================
-  // 📝 BATCH INVENTORY ADJUSTMENT (Vérification de Stock)
+  // 📝 BATCH INVENTORY ADJUSTMENT
   // =========================================================================
   adjustInventoryBatch: async (req: Request, res: Response) => {
     try {
@@ -463,7 +499,6 @@ export const InternalController = {
           for (const item of adjustments) {
               const { productId, theoreticalQuantity, realQuantity } = item;
               const diff = realQuantity - theoreticalQuantity;
-              
               if (diff === 0) continue; 
 
               const product = await tx.productB.findUnique({ where: { id: productId } });

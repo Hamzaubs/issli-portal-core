@@ -18,3 +18,5 @@ build/
 # System Files
 .DS_Store
 Thumbs.db
+packages/db-legal/src/generated
+packages/db-internal/src/generated

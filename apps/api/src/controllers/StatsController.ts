@@ -1,8 +1,7 @@
-// apps/api/src/controllers/StatsController.ts
 import { Request, Response } from 'express';
 import { prismaInternal, MovementType } from '@marine/db-internal';
 import { prismaLegal } from '@marine/db-legal';
-import { Prisma } from '@prisma/client-legal';
+import { Prisma } from '@marine/db-legal';
 
 // 🛡️ HYPER-RESILIENT NUMBER PARSER
 const toNumber = (val: any): number => {
@@ -58,9 +57,10 @@ export const StatsController = {
         prismaInternal.stockMovement.findMany({
             where: { 
                 createdAt: { gte: startDate, lte: endDate }, 
-                // ✅ CRITICAL FIX: Removed the invalid SALE_CREDIT. 
-                // The DB only uses SALE_CASH, RETURN, and PAYMENT for operational flow.
-                type: { in: [MovementType.SALE_CASH, MovementType.RETURN, MovementType.PAYMENT] } 
+                // ✅ CRITICAL FIX 1: Restored SALE_CREDIT so true sales hit the Global Revenue
+                type: { in: [MovementType.SALE_CASH, MovementType.SALE_CREDIT, MovementType.RETURN, MovementType.PAYMENT] },
+                // ✅ CRITICAL FIX 2: Shield analytics from Legacy Debt imports
+                snapshotProductName: { not: { contains: '[REPRISE DE DETTE]' } }
             },
             select: { createdAt: true, type: true, paymentMethod: true, amount: true, quantity: true, snapshotPurchaseCost: true }
         }),
@@ -136,20 +136,25 @@ export const StatsController = {
           const isCash = method === 'CASH' || method === 'ESPECES' || method === 'VIREMENT' || method === 'TRANSFER';
           const isCheck = method === 'CHECK' || method === 'CHEQUE';
 
-          // JS safety: Check if it's a sale (even if legacy DB string exists)
           if (m.type === 'SALE_CASH' || (m.type as any) === 'SALE_CREDIT') {
               caCash += amt;
               costB += cst;
               salesCountB += 1;
               daily.internalSales += amt;
-              if (isCash) realCashB += amt;
-              if (isCheck) checksB += amt;
+              if (m.type === 'SALE_CASH') {
+                  if (isCash) realCashB += amt;
+                  if (isCheck) checksB += amt;
+              }
           } else if (m.type === 'RETURN') {
               caCash -= amt;
               costB -= cst;
               daily.internalRefunds += amt;
-              if (isCash) realCashB -= amt;
-              if (isCheck) checksB -= amt;
+              // Deduct from cash drawer only if it was a cash refund
+              if (m.paymentMethod === 'CASH' || m.paymentMethod === 'ESPECES') { 
+                  realCashB -= amt; 
+              } else if (isCheck) { 
+                  checksB -= amt; 
+              }
           } else if (m.type === 'PAYMENT') {
               if (method === 'COMPENSATION' || method === 'AVOIR') return;
               if (isCash) realCashB += amt;
