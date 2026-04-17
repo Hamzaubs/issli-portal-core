@@ -48,7 +48,7 @@ async function runHealthCheck() {
         try {
             // Silo B
             const prodB = await prismaInternal.productB.create({
-                data: { name: "_TEST_PROD_B", internalSku: "TEST-B-001", purchaseCost: 50, sellingPrice: 100, quantity: 50 }
+                data: { name: "_TEST_PROD_B", internalSku: "TEST-B-001", purchaseCost: 50, priceHT: 100, vatRate: 0, priceTTC: 100, quantity: 50 }
             });
             testData.siloB.product = prodB.id;
 
@@ -78,7 +78,7 @@ async function runHealthCheck() {
         try {
             // Silo B Devis (2 units @ 100 MAD = 200 MAD)
             const quoteB = await prismaInternal.stockMovement.create({
-                data: { type: MovementType.QUOTE, productId: testData.siloB.product, clientId: testData.siloB.client, quantity: 2, amount: 200, snapshotPurchaseCost: 50, snapshotSellingPrice: 100 }
+                data: { type: MovementType.QUOTE, productId: testData.siloB.product, clientId: testData.siloB.client, quantity: 2, amount: 200, snapshotPurchaseCost: 50, snapshotPriceHT: 100, snapshotVatRate: 0, snapshotPriceTTC: 100, totalHT: 200, totalTVA: 0 }
             });
             testData.siloB.movements.push(quoteB.id);
 
@@ -99,7 +99,7 @@ async function runHealthCheck() {
             // SILO B: Sell 5 units @ 100 = 500 MAD Debt
             await prismaInternal.$transaction([
                 prismaInternal.stockMovement.create({
-                    data: { type: MovementType.SALE_CREDIT, productId: testData.siloB.product, clientId: testData.siloB.client, quantity: 5, amount: 500, paymentMethod: 'CREDIT', snapshotPurchaseCost: 50, snapshotSellingPrice: 100 }
+                    data: { type: MovementType.SALE_CREDIT, productId: testData.siloB.product, clientId: testData.siloB.client, quantity: 5, amount: 500, paymentMethod: 'CREDIT', snapshotPurchaseCost: 50, snapshotPriceHT: 100, snapshotVatRate: 0, snapshotPriceTTC: 100, totalHT: 500, totalTVA: 0 }
                 }),
                 prismaInternal.productB.update({ where: { id: testData.siloB.product }, data: { quantity: { decrement: 5 } } }),
                 prismaInternal.clientB.update({ where: { id: testData.siloB.client }, data: { balance: { increment: 500 } } })
@@ -129,7 +129,7 @@ async function runHealthCheck() {
             // SILO B: Pay 250 MAD (Half of 500)
             await prismaInternal.$transaction([
                 prismaInternal.stockMovement.create({
-                    data: { type: MovementType.PAYMENT, productId: testData.siloB.product, clientId: testData.siloB.client, quantity: 0, amount: -250, paymentMethod: 'CASH' }
+                    data: { type: MovementType.PAYMENT, productId: testData.siloB.product, clientId: testData.siloB.client, quantity: 0, amount: -250, paymentMethod: 'CASH', totalHT: 0, totalTVA: 0 }
                 }),
                 prismaInternal.clientB.update({ where: { id: testData.siloB.client }, data: { balance: { decrement: 250 } } })
             ]);
@@ -154,7 +154,7 @@ async function runHealthCheck() {
             // SILO B: Pay remaining 250 MAD
             await prismaInternal.$transaction([
                 prismaInternal.stockMovement.create({
-                    data: { type: MovementType.PAYMENT, productId: testData.siloB.product, clientId: testData.siloB.client, quantity: 0, amount: -250, paymentMethod: 'CASH' }
+                    data: { type: MovementType.PAYMENT, productId: testData.siloB.product, clientId: testData.siloB.client, quantity: 0, amount: -250, paymentMethod: 'CASH', totalHT: 0, totalTVA: 0 }
                 }),
                 prismaInternal.clientB.update({ where: { id: testData.siloB.client }, data: { balance: { decrement: 250 } } })
             ]);
@@ -179,7 +179,7 @@ async function runHealthCheck() {
             // SILO B: Return 1 unit
             await prismaInternal.$transaction([
                 prismaInternal.stockMovement.create({
-                    data: { type: MovementType.RETURN, productId: testData.siloB.product, clientId: testData.siloB.client, quantity: 1, amount: 100, paymentMethod: 'CASH', snapshotPurchaseCost: 50, snapshotSellingPrice: 100 }
+                    data: { type: MovementType.RETURN, productId: testData.siloB.product, clientId: testData.siloB.client, quantity: 1, amount: 100, paymentMethod: 'CASH', snapshotPurchaseCost: 50, snapshotPriceHT: 100, snapshotVatRate: 0, snapshotPriceTTC: 100, totalHT: 100, totalTVA: 0 }
                 }),
                 prismaInternal.productB.update({ where: { id: testData.siloB.product }, data: { quantity: { increment: 1 } } }) // Stock goes from 45 back to 46
             ]);
