@@ -54,7 +54,7 @@ export const InternalLegacyDebtModal: React.FC<Props> = ({ clientId, clientName,
                             <History size={24}/>
                         </div>
                         <div>
-                            <h3 className="font-black text-slate-800 text-lg">Importer Ancienne Dette (Silo B)</h3>
+                            <h3 className="font-black text-slate-800 text-lg">Importer Ancienne Créance</h3>
                             <p className="text-xs font-bold text-slate-500">Client: {clientName}</p>
                         </div>
                     </div>

@@ -39,8 +39,8 @@ export const InventoryDashboard: React.FC = () => {
     };
 
     const handleCountChange = (id: string, value: string) => {
-        const val = value === '' ? 0 : parseInt(value);
-        setCounts(prev => ({ ...prev, [id]: val }));
+        const val = value === '' ? 0 : parseFloat(value); // Allow floats for KG/M/L units
+        setCounts(prev => ({ ...prev, [id]: isNaN(val) ? 0 : val }));
     };
 
     const handleValidate = async () => {
@@ -164,7 +164,10 @@ export const InventoryDashboard: React.FC = () => {
                         {displayedProducts.map(p => {
                             const realCount = counts[p.id] ?? p.quantity;
                             const diff = realCount - p.quantity;
-                            const valueImpact = diff * p.purchaseCost;
+                            
+                            // 🧮 STRICT CENT-MATH: Secure value impact tracking to prevent drift on fraction quantities
+                            const safePurchaseCost = Number(p.purchaseCost || 0);
+                            const valueImpact = (Math.round(diff * 100) * Math.round(safePurchaseCost * 100)) / 10000;
 
                             return (
                                 <tr key={p.id} className={`transition-colors ${diff !== 0 ? 'bg-amber-50/30' : 'hover:bg-slate-50'}`}>

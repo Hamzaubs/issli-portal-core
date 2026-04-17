@@ -1,4 +1,4 @@
-// apps/api/src/routes/supplier.routes.ts
+// apps/api/src/routes/supplier.ts
 import { Router } from 'express';
 import { SupplierController } from '../controllers/SupplierController';
 import { authenticateToken } from '../middleware/AuthMiddleware';

@@ -1,6 +1,7 @@
+// web-ui/src/components/InternalDeliveryNote.tsx
 import React, { useRef } from 'react';
 import { useReactToPrint } from 'react-to-print';
-import { X, Printer, MapPin, Phone, FileText, ArrowLeftRight, AlertCircle, Package } from 'lucide-react';
+import { X, Printer, Package, ArrowLeftRight, FileText, AlertCircle } from 'lucide-react';
 
 interface Props {
     data: any;
@@ -29,7 +30,6 @@ export const InternalDeliveryNote: React.FC<Props> = ({ data, onClose }) => {
         } 
     };
 
-    // ✅ Translation Helper for A4 Documents
     const getPaymentMethodLabel = (m?: string) => {
         switch(m) {
             case 'CASH': case 'ESPECES': return 'ESPÈCES';
@@ -40,36 +40,39 @@ export const InternalDeliveryNote: React.FC<Props> = ({ data, onClose }) => {
         }
     };
 
+    // 🛡️ STRICT SCHEMA ALIGNMENT: Prioritizes priceTTC
     const rawItemsList = data.items && data.items.length > 0 ? data.items : [{
         productName: data.productName || data.name || '-',
         sku: data.sku || data.productSku || data.internalSku || '-',
         quantity: data.quantity || 0,
         measureUnit: data.measureUnit || 'UNIT',
-        unitPrice: data.unitPrice || data.sellingPrice || 0,
+        unitPrice: data.unitPrice || data.priceTTC || data.sellingPrice || 0,
         total: data.total || data.amount || 0
     }];
 
+    // 🧮 STRICT CENT-MATH: Eradicates floating point drift on printed documents
     const consolidatedItems = rawItemsList.reduce((acc: any[], item: any) => {
         const matchingKey = item.sku !== '-' ? item.sku : item.productName;
         const existingItem = acc.find(i => (i.sku !== '-' && i.sku === matchingKey) || i.productName === matchingKey);
         
         if (existingItem) {
             existingItem.quantity = Number(existingItem.quantity) + Number(item.quantity);
-            existingItem.total = Number(existingItem.total) + Number(item.total);
+            existingItem.total = (Math.round(existingItem.total * 100) + Math.round(item.total * 100)) / 100;
         } else {
             acc.push({ ...item, quantity: Number(item.quantity), total: Number(item.total) });
         }
         return acc;
     }, []);
 
-    const computedTotal = data.total !== undefined ? data.total : consolidatedItems.reduce((sum: number, item: any) => sum + item.total, 0);
+    // 🧮 STRICT CENT-MATH for Global Total
+    const computedTotal = data.total !== undefined 
+        ? data.total 
+        : consolidatedItems.reduce((sum: number, item: any) => sum + Math.round(item.total * 100), 0) / 100;
 
-    // ✅ PURE LOGIC: Grouping is ignored. A document is strictly a BL, Devis, or Avoir.
     const docType = data.isQuote ? 'DEVIS' : data.isReturn ? "BON D'AVOIR" : 'BON DE LIVRAISON';
     const totalLabel = data.isQuote ? 'Total Estimé' : data.isReturn ? 'Total Avoir (Crédit)' : 'Total Net à Payer';
     const subLabel = data.isQuote ? 'Proposition commerciale' : data.isReturn ? 'Montant à déduire ou rembourser' : 'Valeur de la marchandise livrée';
-    const themeColor = data.isReturn ? 'text-red-700' : data.isQuote ? 'text-amber-700' : 'text-emerald-900';
-    const borderColor = data.isReturn ? 'border-red-900' : data.isQuote ? 'border-amber-900' : 'border-slate-900';
+    const themeColor = data.isReturn ? 'text-red-600' : data.isQuote ? 'text-amber-600' : 'text-slate-800';
 
     return (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center z-[9999] p-4 animate-in fade-in overflow-y-auto">
@@ -79,7 +82,6 @@ export const InternalDeliveryNote: React.FC<Props> = ({ data, onClose }) => {
                     @page { size: A4; margin: 0; }
                     body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
                     .print-hidden { display: none !important; }
-                    .print-padding { padding: 15mm !important; }
                 }
             `}</style>
 
@@ -93,33 +95,15 @@ export const InternalDeliveryNote: React.FC<Props> = ({ data, onClose }) => {
             </div>
 
             <div className="my-4 print:my-0 w-full flex justify-center">
-                <div ref={componentRef} className="bg-white w-[210mm] min-h-[297mm] p-[15mm] print-padding text-slate-900 shadow-2xl print:shadow-none relative flex flex-col">
+                {/* pt-[45mm] allows space for pre-printed paper header */}
+                <div ref={componentRef} className="bg-white w-[210mm] min-h-[297mm] px-[15mm] pt-[45mm] pb-[15mm] text-slate-900 shadow-2xl print:shadow-none relative flex flex-col">
                     
-                    {/* HEADER */}
-                    <div className={`flex justify-between items-start border-b-2 ${borderColor} pb-6 mb-6`}>
-                        <div>
-                            <div className="mb-3">
-                                <h1 className="text-4xl font-black tracking-tighter text-emerald-800 leading-none print:text-emerald-800">
-                                    ISSLI PECHE
-                                </h1>
-                                <div className="flex items-center gap-2 mt-2">
-                                    <div className="h-1.5 w-10 bg-emerald-600 rounded-full print:bg-emerald-600"></div>
-                                    <span className="text-[11px] text-slate-500 font-bold uppercase tracking-widest">Équipements Marins (Magasin B)</span>
-                                </div>
-                            </div>
-                            <div className="text-xs text-slate-500 space-y-1 mt-2 border-l-2 border-slate-100 pl-2">
-                                <p className="flex items-center gap-2"><MapPin size={12} className="text-slate-400"/> 19, Rue Bni Aamir, Casablanca</p>
-                                <p className="flex items-center gap-2"><Phone size={12} className="text-slate-400"/> +212 5 22 20 51 96</p>
-                            </div>
-                        </div>
+                    {/* LETTERHEAD READY HEADER */}
+                    <div className="flex justify-end items-start mb-8 relative z-10">
                         <div className="text-right">
-                            <h2 className={`text-3xl font-black uppercase mb-1 tracking-tighter print:${themeColor} ${themeColor}`}>{docType}</h2>
-                            <p className="text-sm font-bold text-slate-500 mb-3">Réf: {data.id || '-'}</p>
-                            
-                            <div className="bg-slate-100 border border-slate-200 rounded-lg p-2 px-4 inline-block text-right print:bg-slate-100">
-                                <p className="text-[10px] text-slate-500 uppercase font-bold">Date d'édition</p>
-                                <p className="font-mono font-bold text-slate-900 text-sm">{(data.date || data.createdAt) ? new Date(data.date || data.createdAt).toLocaleDateString('fr-MA') : '-'}</p>
-                            </div>
+                          <h2 className={`text-4xl font-light uppercase tracking-wide mb-1 print:${themeColor} ${themeColor}`}>{docType}</h2>
+                          <p className="text-slate-900 font-bold text-lg">Réf: {data.id || '-'}</p>
+                          <p className="text-slate-500 text-xs mt-1">Date : {(data.date || data.createdAt) ? new Date(data.date || data.createdAt).toLocaleDateString('fr-MA') : '-'}</p>
                         </div>
                     </div>
 
@@ -131,9 +115,9 @@ export const InternalDeliveryNote: React.FC<Props> = ({ data, onClose }) => {
                     )}
 
                     {/* CLIENT INFO */}
-                    <div className="flex justify-end mb-8">
-                        <div className="w-1/2 bg-slate-50 border border-slate-200 rounded-xl p-5 print:bg-slate-50 print:border-slate-300">
-                            <p className="text-[10px] font-bold text-emerald-700 uppercase mb-1 flex items-center gap-2 print:text-emerald-700">
+                    <div className="flex justify-start mb-10 relative z-10">
+                        <div className="w-[55%] bg-slate-50 border border-slate-200 rounded-xl p-5 print:bg-slate-50 print:border-slate-300 shadow-sm">
+                            <p className="text-[10px] font-bold text-slate-500 uppercase mb-1 flex items-center gap-2">
                                 {data.isReturn ? <ArrowLeftRight size={12}/> : <FileText size={12}/>} 
                                 {data.isReturn ? 'Client (Expéditeur)' : 'Client / Destinataire'}
                             </p>
@@ -145,18 +129,18 @@ export const InternalDeliveryNote: React.FC<Props> = ({ data, onClose }) => {
                     <div className="flex-1">
                         <table className="w-full text-sm border-collapse">
                             <thead>
-                                <tr className="bg-slate-100 text-slate-700 uppercase text-[10px] font-bold tracking-wider print:bg-slate-100 border-y border-slate-200">
+                                <tr className="bg-slate-50 text-slate-700 uppercase text-[10px] font-bold tracking-wider print:bg-slate-50 border-y border-slate-200">
                                     <th className="p-3 text-left w-1/2">Description / Article</th>
                                     <th className="p-3 text-center">Quantité</th>
                                     <th className="p-3 text-right">P.U / Info</th>
                                     <th className="p-3 text-right">Montant Total</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-slate-200">
+                            <tbody className="divide-y divide-slate-200 text-xs">
                                 {consolidatedItems.map((item: any, idx: number) => {
                                     const isDeduction = item.total < 0;
                                     return (
-                                        <tr key={idx} className={`border-b border-slate-100 ${isDeduction ? 'bg-red-50/30 print:bg-transparent' : ''}`}>
+                                        <tr key={idx} className={`border-b border-slate-50 ${isDeduction ? 'bg-red-50/30 print:bg-transparent' : ''}`}>
                                             <td className="p-4">
                                                 <div className={`font-bold text-sm ${isDeduction ? 'text-red-800' : 'text-slate-900'}`}>{item.productName}</div>
                                                 <div className="text-[10px] text-slate-500 font-mono mt-0.5 flex items-center gap-1">
@@ -181,8 +165,8 @@ export const InternalDeliveryNote: React.FC<Props> = ({ data, onClose }) => {
                     </div>
 
                     {/* FOOTER & TOTALS */}
-                    <div className="break-inside-avoid">
-                        <div className={`flex justify-between items-end border-t-2 ${borderColor} pt-4 mt-6`}>
+                    <div className="break-inside-avoid mt-8">
+                        <div className={`flex justify-between items-end border-t border-slate-200 pt-4 mt-6`}>
                             <div className="w-1/2 pr-8">
                                 <h4 className="font-bold text-slate-900 uppercase text-[10px] mb-2">Modalité de la transaction</h4>
                                 <div className="space-y-1 text-xs border border-slate-200 rounded-lg p-3 bg-slate-50 print:bg-slate-50">
@@ -205,7 +189,7 @@ export const InternalDeliveryNote: React.FC<Props> = ({ data, onClose }) => {
                             </div>
 
                             <div className="w-5/12">
-                                <div className={`flex justify-between items-center py-2 px-3 rounded-lg print:bg-slate-100 ${computedTotal < 0 ? 'bg-red-50' : 'bg-slate-100'}`}>
+                                <div className={`flex justify-between items-center py-2 px-3 rounded-lg print:bg-slate-50 ${computedTotal < 0 ? 'bg-red-50' : 'bg-slate-50 border border-slate-200'}`}>
                                     <span className={`font-bold text-xs uppercase print:${themeColor} ${themeColor}`}>{totalLabel}</span>
                                     <span className={`font-black text-2xl print:${themeColor} ${themeColor}`}>{formatMAD(computedTotal)}</span>
                                 </div>
@@ -226,10 +210,7 @@ export const InternalDeliveryNote: React.FC<Props> = ({ data, onClose }) => {
                             </div>
                         </div>
 
-                        <div className="mt-6 text-center border-t border-slate-100 pt-4">
-                            <p className="text-[10px] text-emerald-800 font-bold uppercase tracking-wider print:text-emerald-800">ISSLI PECHE S.A.R.L - Gestion de Stock Magasin</p>
-                            <p className="text-[8px] text-slate-400 mt-1">Ce document est généré électroniquement et sert de preuve de mouvement de marchandise.</p>
-                        </div>
+                        {/* INTENTIONALLY BLANK FOOTER SPACE FOR PRE-PRINTED PAPER */}
                     </div>
 
                 </div>

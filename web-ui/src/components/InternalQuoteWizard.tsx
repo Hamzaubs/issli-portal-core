@@ -19,10 +19,8 @@ function debounce(func: Function, wait: number) {
     };
 }
 
-const safeFloat = (val: any) => {
-    const num = parseFloat(val);
-    return isNaN(num) ? 0 : num;
-};
+// 🛡️ STRICT SCHEMA ALIGNMENT
+const getSellingPrice = (p: any) => Number(p.priceTTC || 0);
 
 const formatMoney = (val: number) => 
     val.toLocaleString('fr-MA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -43,7 +41,6 @@ export const InternalQuoteWizard: React.FC<Props> = ({ onCancel, onSuccess }) =>
     const [showClientForm, setShowClientForm] = useState(false);
     const [newClientData, setNewClientData] = useState({ name: '', phone: '' });
 
-    // ✅ Cart Processing Mode (Quote vs Actual Sale)
     const [processMode, setProcessMode] = useState<'QUOTE' | 'SALE'>('QUOTE');
     const [paymentMethod, setPaymentMethod] = useState('CASH');
 
@@ -68,7 +65,7 @@ export const InternalQuoteWizard: React.FC<Props> = ({ onCancel, onSuccess }) =>
         if (existing) {
             setCart(cart.map(item => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item));
         } else {
-            setCart([...cart, { ...product, quantity: 1, unitPrice: safeFloat(product.sellingPrice) }]);
+            setCart([...cart, { ...product, quantity: 1, unitPrice: getSellingPrice(product) }]);
         }
     };
 
@@ -80,7 +77,9 @@ export const InternalQuoteWizard: React.FC<Props> = ({ onCancel, onSuccess }) =>
     };
 
     const removeFromCart = (id: string) => setCart(cart.filter(item => item.id !== id));
-    const totalAmount = cart.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
+    
+    // 🧮 STRICT CENT-MATH
+    const totalAmount = cart.reduce((sum, item) => sum + Math.round(item.quantity * item.unitPrice * 100), 0) / 100;
 
     const handleCreateClient = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -100,7 +99,6 @@ export const InternalQuoteWizard: React.FC<Props> = ({ onCancel, onSuccess }) =>
 
         setLoading(true);
         try {
-            // ✅ Utilizes the Upgraded Backend Engine to process full sales carts
             await client.post('/internal/transactions/batch', {
                 type: processMode === 'QUOTE' ? 'QUOTE' : 'SALE_CASH',
                 clientId: selectedClient.id,
@@ -208,7 +206,7 @@ export const InternalQuoteWizard: React.FC<Props> = ({ onCancel, onSuccess }) =>
                                         <div className="font-bold text-slate-700 text-sm line-clamp-2 leading-tight group-hover:text-amber-800">{p.name}</div>
                                         <div className="flex justify-between items-end mt-2">
                                             <div className="text-[10px] text-slate-400 font-medium bg-white px-1.5 py-0.5 rounded border border-slate-200">Stock: {p.quantity}</div>
-                                            <div className="font-mono font-bold text-amber-600">{formatMoney(p.sellingPrice)}</div>
+                                            <div className="font-mono font-bold text-amber-600">{formatMoney(getSellingPrice(p))}</div>
                                         </div>
                                     </button>
                                 ))}
@@ -233,7 +231,7 @@ export const InternalQuoteWizard: React.FC<Props> = ({ onCancel, onSuccess }) =>
                                                 <span className="text-sm font-bold w-6 text-center">{item.quantity}</span>
                                                 <button onClick={() => updateQuantity(item.id, 1)} className="w-6 h-6 bg-white border rounded text-xs font-bold hover:bg-slate-100">+</button>
                                             </div>
-                                            <div className="font-mono font-bold text-slate-700">{formatMoney(item.unitPrice * item.quantity)}</div>
+                                            <div className="font-mono font-bold text-slate-700">{formatMoney((Math.round(item.unitPrice * item.quantity * 100)) / 100)}</div>
                                         </div>
                                     </div>
                                 ))}
@@ -241,7 +239,6 @@ export const InternalQuoteWizard: React.FC<Props> = ({ onCancel, onSuccess }) =>
                             
                             {/* CHECKOUT CONTROLS */}
                             <div className="p-5 bg-white border-t border-slate-200 shadow-[0_-10px_30px_rgba(0,0,0,0.05)]">
-                                
                                 <div className="flex gap-2 mb-4 p-1 bg-slate-100 rounded-lg">
                                     <button onClick={() => setProcessMode('QUOTE')} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${processMode === 'QUOTE' ? 'bg-white shadow text-blue-700' : 'text-slate-500 hover:text-slate-700'}`}>
                                         📝 DEVIS

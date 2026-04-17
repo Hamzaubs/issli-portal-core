@@ -213,6 +213,12 @@ export const InvoicesController = {
              ref = `DOC-${Date.now()}`;
           }
 
+          // 🛡️ REFERENCE COLLISION SHIELD FOR LEGAL DOCUMENTS
+          const existingDoc = await tx.invoice.findUnique({ where: { reference: ref } });
+          if (existingDoc) {
+              throw new Error(`Collision détectée : La référence '${ref}' vient d'être utilisée par un autre opérateur. Veuillez simplement re-cliquer sur valider.`);
+          }
+
           // 🛑 FIX: STRICT STATE MACHINE CALCULATION
           let status = 'EN_ATTENTE';
           if (type === 'AVOIR') {
@@ -298,6 +304,12 @@ export const InvoicesController = {
             const year = new Date().getFullYear();
             const seq = await tx.invoiceSequence.upsert({ where: { year: 9999 }, update: { lastCount: { increment: 1 } }, create: { year: 9999, lastCount: 1 } });
             const creditRef = `AVR-${year}-${seq.lastCount.toString().padStart(4, '0')}`;
+
+            // 🛡️ REFERENCE COLLISION SHIELD
+            const existingAvoir = await tx.invoice.findUnique({ where: { reference: creditRef } });
+            if (existingAvoir) {
+                throw new Error(`Collision détectée : La référence '${creditRef}' vient d'être générée par un autre opérateur. Veuillez réessayer.`);
+            }
 
             if (partialReturns && Array.isArray(partialReturns) && partialReturns.length > 0) {
                 let totalHT = new Prisma.Decimal(0);
@@ -459,6 +471,10 @@ export const InvoicesController = {
             const seqAvoir = await tx.invoiceSequence.upsert({ where: { year: 9999 }, update: { lastCount: { increment: 1 } }, create: { year: 9999, lastCount: 1 } });
             const creditRef = `AVR-${year}-${seqAvoir.lastCount.toString().padStart(4, '0')}`;
 
+            // 🛡️ REFERENCE COLLISION SHIELD FOR AVOIR
+            const existingAvoir = await tx.invoice.findUnique({ where: { reference: creditRef } });
+            if (existingAvoir) throw new Error(`Collision détectée : La référence d'avoir '${creditRef}' vient d'être utilisée. Veuillez réessayer.`);
+
             const creditNote = await tx.invoice.create({
                 data: {
                     reference: creditRef, legacyReference: legacyRef, type: 'AVOIR', status: 'PAYEE',
@@ -497,6 +513,10 @@ export const InvoicesController = {
 
             const seqFac = await tx.invoiceSequence.upsert({ where: { year }, update: { lastCount: { increment: 1 } }, create: { year, lastCount: 1 } });
             const invoiceRef = `FAC-${year}-${seqFac.lastCount.toString().padStart(4, '0')}`;
+
+            // 🛡️ REFERENCE COLLISION SHIELD FOR INVOICE
+            const existingInv = await tx.invoice.findUnique({ where: { reference: invoiceRef } });
+            if (existingInv) throw new Error(`Collision détectée : La référence de facture '${invoiceRef}' vient d'être utilisée. Veuillez réessayer.`);
 
             const balanceToPay = saleTotalTTC.sub(creditTotalTTC);
             const isFullyCovered = balanceToPay.lte(0);

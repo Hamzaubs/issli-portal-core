@@ -1,3 +1,4 @@
+// apps/api/src/controllers/InternalClientController.ts
 import { Request, Response } from 'express';
 import { prismaInternal, Prisma, MovementType } from '@marine/db-internal';
 
@@ -38,7 +39,7 @@ export const InternalClientController = {
       ]);
       
       const safeClients = clients.map(c => ({ ...c, balance: c.balance.toNumber(), totalSpent: c.totalSpent.toNumber() }));
-      res.json({ data: safeClients, meta: { total, page: Number(page), pages: Math.ceil(total / Number(limit)), globalDebt: debtStats._sum.balance?.toNumber() || 0 } });
+      res.json({ data: safeClients, meta: { total, page: Number(page), pages: Math.ceil(total / Number(limit)), globalDebt: debtStats._sum?.balance?.toNumber() || 0 } });
     } catch (e) { res.status(500).json({ error: "Erreur recherche clients" }); }
   },
 
@@ -48,18 +49,24 @@ export const InternalClientController = {
       const client = await prismaInternal.clientB.findUnique({ where: { id }, include: { _count: { select: { movements: true } } } });
       if (!client) return res.status(404).json({ error: "Client introuvable" });
 
-      // 🛡️ THE SHIELD: Calculate Volume D'Achats strictly from REAL sales, entirely ignoring Legacy Debt injections.
       const stats = await prismaInternal.stockMovement.aggregate({ 
           where: { 
               clientId: id, 
               type: { in: ['SALE_CASH', 'SALE_CREDIT', 'RETURN'] },
-              snapshotProductName: { not: { contains: '[REPRISE DE DETTE]' } } // <--- Blocks Debt from inflating Sales
+              snapshotProductName: { not: { contains: '[REPRISE DE DETTE]' } } 
           }, 
           _sum: { amount: true }, 
           _max: { createdAt: true } 
       });
 
-      res.json({ profile: { ...client, balance: client.balance.toNumber() }, stats: { totalSpent: stats._sum.amount?.toNumber() || 0, lastPurchase: stats._max.createdAt, transactionCount: client._count.movements } });
+      res.json({ 
+          profile: { ...client, balance: client.balance.toNumber() }, 
+          stats: { 
+              totalSpent: stats._sum?.amount?.toNumber() || 0, 
+              lastPurchase: stats._max?.createdAt || null, 
+              transactionCount: client._count.movements 
+          } 
+      });
     } catch (e) { res.status(500).json({ error: "Erreur profil" }); }
   },
 
@@ -109,11 +116,8 @@ export const InternalClientController = {
           const history = allMovements.map(m => {
               const amount = toNumber(m.amount);
               const isDebit = m.type === 'SALE_CASH' || m.type === 'SALE_CREDIT';
-              
               const debit = isDebit ? Math.abs(amount) : 0;
               const credit = !isDebit ? Math.abs(amount) : 0;
-
-              // Visually separate Legacy Debt in the PDF statement
               const isLegacyDebt = m.snapshotProductName?.includes('[REPRISE DE DETTE]');
 
               return {
@@ -150,55 +154,74 @@ export const InternalClientController = {
       const { id } = req.params;
       const { amount, method, ref, note, movementId } = req.body;
       const rawUserId = (req as any).user?.id;
-      const payAmount = new Prisma.Decimal(amount);
+      
+      const payAmountCents = Math.round(Number(amount) * 100);
 
-      if (!amount || payAmount.lte(0)) return res.status(400).json({ error: "Montant invalide" });
+      if (payAmountCents <= 0) return res.status(400).json({ error: "Montant invalide" });
 
       await prismaInternal.$transaction(async (tx) => {
-          const userExists = await tx.user.findUnique({ where: { id: rawUserId } });
-          const safeUserId = userExists ? rawUserId : null;
+          // 🛡️ REFERENCE COLLISION SHIELD FOR CLIENT PAYMENTS
+          const finalRef = ref ? String(ref).trim() : `PAY-${Date.now().toString().slice(-8)}-${Math.floor(Math.random() * 10000)}`;
+          const existingMovement = await tx.stockMovement.findFirst({ where: { paymentRef: finalRef } });
+          if (existingMovement) {
+              throw new Error(`La référence de paiement '${finalRef}' existe déjà. Veuillez utiliser une référence unique.`);
+          }
 
+          const userExists = rawUserId ? await tx.user.findUnique({ where: { id: rawUserId } }) : null;
+          const safeUserId = userExists ? rawUserId : null;
+          
           const anyProduct = await tx.productB.findFirst();
           if (!anyProduct) throw new Error("Veuillez créer au moins un produit pour initialiser les mouvements.");
+
+          // Convert cents to Decimal for Prisma
+          const payAmountDecimal = new Prisma.Decimal((payAmountCents / 100).toFixed(2));
 
           await tx.stockMovement.create({
               data: { 
                   type: MovementType.PAYMENT, clientId: id, userId: safeUserId,
-                  amount: payAmount.negated(), paidAmount: payAmount, quantity: 0, 
+                  amount: payAmountDecimal.negated(), paidAmount: payAmountDecimal, quantity: 0, 
                   productId: anyProduct.id, snapshotProductName: note || `Règlement Dette (${method})`,
-                  paymentMethod: method, paymentRef: ref
+                  paymentMethod: method, paymentRef: finalRef,
+                  totalHT: new Prisma.Decimal(0), totalTVA: new Prisma.Decimal(0)
               }
           });
 
-          await tx.clientB.update({ where: { id }, data: { balance: { decrement: payAmount } } });
+          await tx.clientB.update({ where: { id }, data: { balance: { decrement: payAmountDecimal } } });
 
+          // 🧮 CENTS BASED WATERFALL MATH
           if (movementId) {
-              await tx.stockMovement.update({ where: { id: movementId }, data: { paidAmount: { increment: payAmount } } });
+              await tx.stockMovement.update({ where: { id: movementId }, data: { paidAmount: { increment: payAmountDecimal } } });
           } else {
-              let remaining = payAmount;
+              let remainingCents = payAmountCents;
               const unpaid = await tx.stockMovement.findMany({
                   where: { clientId: id, type: { in: ['SALE_CASH', 'SALE_CREDIT'] } },
                   orderBy: { createdAt: 'asc' }
               });
               
               for (const ticket of unpaid) {
-                  if (remaining.lte(0)) break;
+                  if (remainingCents <= 0) break;
                   
-                  const ticketAmount = ticket.amount || new Prisma.Decimal(0);
-                  const ticketPaid = ticket.paidAmount || new Prisma.Decimal(0);
+                  const ticketAmountCents = Math.round(toNumber(ticket.amount) * 100);
+                  const ticketPaidCents = Math.round(toNumber(ticket.paidAmount) * 100);
                   const returnedQty = ticket.returnedQuantity || 0;
                   const qty = ticket.quantity || 1;
                   
-                  const returnedRatio = new Prisma.Decimal(returnedQty).div(qty);
-                  const returnedValue = ticketAmount.mul(returnedRatio);
+                  // Value of returned goods
+                  const returnedRatio = returnedQty / qty;
+                  const returnedValueCents = Math.round(ticketAmountCents * returnedRatio);
                   
-                  const effectiveAmount = ticketAmount.sub(returnedValue);
-                  const due = effectiveAmount.sub(ticketPaid);
+                  const effectiveAmountCents = ticketAmountCents - returnedValueCents;
+                  const dueCents = effectiveAmountCents - ticketPaidCents;
                   
-                  if (due.gt(0)) {
-                      const toApply = remaining.gte(due) ? due : remaining;
-                      await tx.stockMovement.update({ where: { id: ticket.id }, data: { paidAmount: { increment: toApply } } });
-                      remaining = remaining.sub(toApply);
+                  if (dueCents > 0) {
+                      const toApplyCents = remainingCents >= dueCents ? dueCents : remainingCents;
+                      
+                      await tx.stockMovement.update({ 
+                          where: { id: ticket.id }, 
+                          data: { paidAmount: { increment: new Prisma.Decimal(toApplyCents / 100) } } 
+                      });
+                      
+                      remainingCents -= toApplyCents;
                   }
               }
           }
@@ -215,16 +238,6 @@ export const InternalClientController = {
 
       const existingName = await prismaInternal.clientB.findFirst({ where: { name: { equals: cleanName, mode: 'insensitive' } } });
       if (existingName) return res.status(400).json({ error: "Un client avec ce nom existe déjà." });
-
-      if (phone?.trim()) { 
-          const existingPhone = await prismaInternal.clientB.findFirst({ where: { phone: phone.trim() } }); 
-          if (existingPhone) return res.status(400).json({ error: `Ce numéro est utilisé par ${existingPhone.name}` }); 
-      }
-      
-      if (ice?.trim()) { 
-          const existingIce = await prismaInternal.clientB.findFirst({ where: { ice: ice.trim() } }); 
-          if (existingIce) return res.status(400).json({ error: `Cet ICE est utilisé par ${existingIce.name}` }); 
-      }
 
       const client = await prismaInternal.clientB.create({ 
           data: { name: cleanName, phone: phone?.trim(), ice: ice?.trim(), address: address?.trim(), balance: 0, totalSpent: 0 } 
@@ -250,7 +263,6 @@ export const InternalClientController = {
       } catch (e) { res.status(500).json({ error: "Erreur suppression" }); } 
   },
 
-  // 🛡️ THE DECOUPLING FIX
   importLegacyDebt: async (req: Request, res: Response) => {
       try {
           const { id } = req.params; 
@@ -263,6 +275,13 @@ export const InternalClientController = {
           const movementDate = issuedAt ? new Date(issuedAt) : new Date();
 
           await prismaInternal.$transaction(async (tx) => {
+              // 🛡️ REFERENCE COLLISION SHIELD FOR LEGACY DEBT
+              const finalRef = legacyRef ? String(legacyRef).trim() : `DETTE-ANCIENNE-${Date.now().toString().slice(-8)}-${Math.floor(Math.random() * 10000)}`;
+              const existingMovement = await tx.stockMovement.findFirst({ where: { paymentRef: finalRef } });
+              if (existingMovement) {
+                  throw new Error(`La référence de dette '${finalRef}' existe déjà dans le système.`);
+              }
+
               const client = await tx.clientB.findUnique({ where: { id } });
               if (!client) throw new Error("Client introuvable");
 
@@ -282,16 +301,18 @@ export const InternalClientController = {
                       amount: debtAmount,
                       paidAmount: new Prisma.Decimal(0),
                       paymentMethod: 'CREDIT',
-                      paymentRef: legacyRef || 'DETTE-ANCIENNE',
+                      paymentRef: finalRef, // Used secured reference
                       snapshotProductName: `[REPRISE DE DETTE] ${note || 'Solde Antérieur'}`,
                       snapshotPurchaseCost: new Prisma.Decimal(0),
-                      snapshotSellingPrice: debtAmount,
+                      snapshotPriceHT: debtAmount,
+                      snapshotVatRate: new Prisma.Decimal(0),
+                      snapshotPriceTTC: debtAmount,
+                      totalHT: debtAmount,
+                      totalTVA: new Prisma.Decimal(0),
                       createdAt: movementDate 
                   }
               });
 
-              // 🚨 FIX: We ONLY increment the Balance (Debt). 
-              // We explicitly DO NOT touch totalSpent so it doesn't inflate Volume d'Achats.
               await tx.clientB.update({
                   where: { id },
                   data: {

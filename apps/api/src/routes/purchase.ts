@@ -1,4 +1,4 @@
-// apps/api/src/routes/purchase.routes.ts
+// apps/api/src/routes/purchase.ts
 import { Router } from 'express';
 import { PurchaseController } from '../controllers/PurchaseController';
 import { authenticateToken } from '../middleware/AuthMiddleware';

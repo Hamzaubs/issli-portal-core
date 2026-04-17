@@ -37,22 +37,24 @@ export const InternalAssetImport: React.FC<Props> = ({ onCancel, onSuccess }) =>
                 const firstLine = lines[0] || "";
                 const separator = firstLine.includes(';') ? ';' : ',';
 
-                // Skip headers (and magic "sep=;" if present)
                 const dataLines = lines.filter(l => !l.startsWith('sep=') && !l.toLowerCase().startsWith('reference'));
 
                 const parsed = dataLines.map((line, idx) => {
                     const cols = line.split(separator).map(c => c.replace(/"/g, '').trim());
                     
-                    // EXPECTED ORDER: Reference | Name | Quantity | Unit | Purchase Cost | Price HT
                     const serial = cols[0];
                     const name = cols[1];
                     
-                    if (!name) return null; // Skip empty rows
+                    if (!name) return null;
 
                     const qty = parseFrenchNum(cols[2]);
                     const unit = cols[3] || 'UNIT';
                     const cost = parseFrenchNum(cols[4]);
-                    const price = parseFrenchNum(cols[5]);
+                    const priceTTC = parseFrenchNum(cols[5]); // 🛡️ Was sellingPrice
+
+                    // 🧮 STRICT CENT-MATH: Calculate HT fallback to prevent backend rejection
+                    const defaultVat = 0.20;
+                    const priceHT = Math.round((priceTTC / (1 + defaultVat)) * 100) / 100;
 
                     return {
                         internalSku: serial || `INT-${Date.now()}-${idx}`,
@@ -60,7 +62,9 @@ export const InternalAssetImport: React.FC<Props> = ({ onCancel, onSuccess }) =>
                         quantity: qty,
                         measureUnit: unit,
                         purchaseCost: cost,
-                        sellingPrice: price,
+                        priceHT: priceHT,       // ✅ New Schema
+                        vatRate: defaultVat,    // ✅ New Schema
+                        priceTTC: priceTTC,     // ✅ New Schema (Replaced sellingPrice)
                     };
                 }).filter(Boolean);
 
@@ -77,7 +81,6 @@ export const InternalAssetImport: React.FC<Props> = ({ onCancel, onSuccess }) =>
         setLogs([]);
 
         try {
-            // We can send the whole array to our new backend endpoint!
             const res = await client.post('/internal/products/batch-import', { products: preview });
             
             if (res.data.errors > 0) {
@@ -96,8 +99,9 @@ export const InternalAssetImport: React.FC<Props> = ({ onCancel, onSuccess }) =>
 
     // 📥 3. DOWNLOAD TEMPLATE
     const downloadTemplate = () => {
-        let content = "sep=;\n"; // Magic Header
-        content += "Reference;Designation;Quantite;Unite;Cout Achat;Prix Vente\n";
+        let content = "sep=;\n"; 
+        // 🛡️ Updated Template Header
+        content += "Reference;Designation;Quantite;Unite;Cout Achat;Prix Vente TTC\n";
         content += "INT-HUILE-40;Huile Moteur 40W;50;L;150,00;200,00\n";
         content += "INT-FIL-01;Filet Standard;100,5;METRE;20,50;35,00\n";
         
@@ -167,7 +171,7 @@ export const InternalAssetImport: React.FC<Props> = ({ onCancel, onSuccess }) =>
                                             <th className="p-3">Article</th>
                                             <th className="p-3 text-center">Quantité</th>
                                             <th className="p-3 text-right text-emerald-600">Coût (Achat)</th>
-                                            <th className="p-3 text-right text-emerald-600">Prix (Vente)</th>
+                                            <th className="p-3 text-right text-emerald-600">Prix (Vente TTC)</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
@@ -179,7 +183,7 @@ export const InternalAssetImport: React.FC<Props> = ({ onCancel, onSuccess }) =>
                                                     {item.quantity} <span className="text-[9px] text-slate-400 font-normal uppercase">{item.measureUnit}</span>
                                                 </td>
                                                 <td className="p-3 text-right font-mono">{item.purchaseCost.toFixed(2)}</td>
-                                                <td className="p-3 text-right font-mono font-bold">{item.sellingPrice.toFixed(2)}</td>
+                                                <td className="p-3 text-right font-mono font-bold">{item.priceTTC.toFixed(2)}</td>
                                             </tr>
                                         ))}
                                     </tbody>

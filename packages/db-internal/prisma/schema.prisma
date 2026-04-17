@@ -1,3 +1,4 @@
+// packages/db-internal/prisma/schema.prisma
 generator client {
   provider      = "prisma-client-js"
   output        = "../src/generated/client" // 🛡️ Local output bypass
@@ -16,7 +17,11 @@ model ProductB {
   internalSku    String   @unique @map("internal_sku") @db.VarChar(50)
   
   purchaseCost   Decimal  @map("purchase_cost") @db.Decimal(10, 2)
-  sellingPrice   Decimal  @map("selling_price") @db.Decimal(10, 2)
+  
+  // ✅ TVA Implementation (Master ERP Analytics)
+  priceHT        Decimal  @default(0) @map("price_ht") @db.Decimal(10, 2)
+  vatRate        Decimal  @default(0) @map("vat_rate") @db.Decimal(4, 2) // e.g., 0.20, 0.10, 0.00
+  priceTTC       Decimal  @default(0) @map("price_ttc") @db.Decimal(10, 2)
   
   quantity       Int      @default(0)
   measureUnit    String   @default("UNIT") 
@@ -42,7 +47,7 @@ model ClientB {
   
   // Financials
   totalSpent Decimal  @default(0) @map("total_spent") @db.Decimal(10, 2)
-  balance    Decimal  @default(0) @db.Decimal(10, 2) // Positive = Debt
+  balance    Decimal  @default(0) @db.Decimal(10, 2) // Positive = Client owes us
 
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
@@ -58,7 +63,8 @@ model ClientB {
 
 model StockMovement {
   id               String   @id @default(uuid())
-  batchId              String?       @map("batch_id")
+  batchId          String?  @map("batch_id")
+  
   // Relationships
   productId        String   @map("product_id")
   product          ProductB @relation(fields: [productId], references: [id])
@@ -66,24 +72,31 @@ model StockMovement {
   clientId         String?  @map("client_id")
   client           ClientB? @relation(fields: [clientId], references: [id])
 
-  userId           String?        @map("user_id")
-  user             User?          @relation(fields: [userId], references: [id])
+  // ✅ New Relationship: Links movement to a Supplier for payments and restocks
+  supplierId       String?  @map("supplier_id")
+  supplier         SupplierB? @relation(fields: [supplierId], references: [id])
+
+  userId           String?  @map("user_id")
+  user             User?    @relation(fields: [userId], references: [id])
 
   // Core Data
   quantity         Int
-  returnedQuantity   Int      @default(0) @map("returned_quantity") // ✅ FIX: Added to track partial/full returns
+  returnedQuantity Int      @default(0) @map("returned_quantity") // ✅ FIX: Added to track partial/full returns
   type             MovementType
   
-  
-  // Financial Data
-  amount           Decimal?       @db.Decimal(10, 2)
+  // ✅ Financial Data (Now with TVA Math)
+  totalHT          Decimal?       @map("total_ht") @db.Decimal(10, 2)
+  totalTVA         Decimal?       @map("total_tva") @db.Decimal(10, 2)
+  amount           Decimal?       @db.Decimal(10, 2) // Remains as Total TTC for legacy compatibility and Exact Due math
   paidAmount       Decimal        @default(0) @map("paid_amount") @db.Decimal(10, 2)
   paymentMethod    String?        @default("CASH")
   paymentRef       String?        // ✅ Native column for Checks/Transfers
 
-  // Snapshots for Audit
+  // ✅ Snapshots for Analytics & Audit Safety
   snapshotPurchaseCost Decimal? @map("snapshot_purchase_cost") @db.Decimal(10, 2)
-  snapshotSellingPrice Decimal? @map("snapshot_selling_price") @db.Decimal(10, 2)
+  snapshotPriceHT      Decimal? @map("snapshot_price_ht") @db.Decimal(10, 2)
+  snapshotVatRate      Decimal? @map("snapshot_vat_rate") @db.Decimal(4, 2)
+  snapshotPriceTTC     Decimal? @map("snapshot_price_ttc") @db.Decimal(10, 2)
   snapshotProductName  String?  @map("snapshot_product_name") @db.VarChar(255)
   
   createdAt        DateTime       @default(now()) @map("created_at") 
@@ -93,6 +106,7 @@ model StockMovement {
   @@index([createdAt, type]) // ⚡ Composite index for lightning-fast Dashboard charts
   @@index([productId])
   @@index([clientId])
+  @@index([supplierId]) // ⚡ Speeds up Supplier history loading
 }
 
 model User {
@@ -120,6 +134,7 @@ enum MovementType {
   QUOTE
   PAYMENT     // ✅ Standardized Payment Type
 }
+
 // 1. THE INTERNAL SUPPLIERS (SILO B)
 model SupplierB {
   id          String   @id @default(uuid())
@@ -135,14 +150,20 @@ model SupplierB {
   if          String?  @db.VarChar(50) 
   patente     String?  @db.VarChar(50)
 
+  // ✅ New Financials (Accounts Payable)
+  totalPurchased Decimal  @default(0) @map("total_purchased") @db.Decimal(10, 2)
+  balance        Decimal  @default(0) @db.Decimal(10, 2) // Positive = We owe them money
+
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   purchases   PurchaseB[] 
+  movements   StockMovement[] // ✅ Links standalone payments to the supplier
 
   @@map("suppliers_internal")
   @@index([ice])
   @@index([name])
+  @@index([balance]) // ⚡ Instantly speeds up "Top Creditors" queries
 }
 
 // 2. THE INTERNAL PURCHASES (SILO B)

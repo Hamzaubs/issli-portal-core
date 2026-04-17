@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
     X, Save, ArrowUpCircle, ArrowDownCircle, RotateCcw, 
-    Plus, Trash2, ShoppingCart, Package, Printer, User, CreditCard 
+    Plus, Trash2, ShoppingCart, Package, Printer, User, CreditCard, Calculator 
 } from 'lucide-react';
 import client from '../api/client';
 import { InternalDeliveryNote } from './InternalDeliveryNote';
@@ -21,7 +21,7 @@ export const TransactionForm: React.FC<Props> = ({ onClose, onSuccess }) => {
     const [clientId, setClientId] = useState('');
     const [quantity, setQuantity] = useState(1);
     
-    // 🛒 Cart State (Enables Silo A Grouping)
+    // 🛒 Cart State (Now upgraded for Master Reality TVA Math)
     const [cart, setCart] = useState<any[]>([]);
     
     // Global Payment State
@@ -47,32 +47,44 @@ export const TransactionForm: React.FC<Props> = ({ onClose, onSuccess }) => {
                     client.get('/internal/clients')
                 ]);
                 setProducts(p.data);
-                // Handle both paginated and flat client responses
                 setClients(c.data.data || c.data || []); 
             } catch (err) { console.error(err); }
         };
         load();
     }, []);
 
+    // ========================================================================
+    // 🧮 ADD TO CART: CENT-BASED MATH ENGINE
+    // ========================================================================
     const addToCart = () => {
         if (!productId) return;
         const product = products.find(p => p.id === productId);
         if (!product) return;
 
-        // Safety Check (Preserved from your original)
+        // Safety Check
         if (type === 'SALE_CASH' && product.quantity < quantity) {
             alert(`Stock insuffisant pour ${product.name}. Disponible: ${product.quantity}`);
             return;
         }
 
+        const qty = Number(quantity);
+        // Execute math based on exact database values to prevent UI drift
+        const itemTotalHT = product.priceHT * qty;
+        const itemTotalTTC = product.priceTTC * qty;
+        const itemTotalTVA = itemTotalTTC - itemTotalHT;
+
         const newItem = {
             productId: product.id,
             name: product.name,
             internalSku: product.internalSku,
-            quantity: Number(quantity),
+            quantity: qty,
             measureUnit: product.measureUnit,
-            sellingPrice: product.sellingPrice,
-            total: Number(quantity) * product.sellingPrice
+            priceHT: product.priceHT,
+            vatRate: product.vatRate,
+            priceTTC: product.priceTTC,
+            totalHT: itemTotalHT,
+            totalTVA: itemTotalTVA,
+            totalTTC: itemTotalTTC
         };
 
         setCart([...cart, newItem]);
@@ -84,7 +96,10 @@ export const TransactionForm: React.FC<Props> = ({ onClose, onSuccess }) => {
         setCart(cart.filter((_, i) => i !== index));
     };
 
-    const cartTotal = cart.reduce((sum, item) => sum + item.total, 0);
+    // 📊 Dynamic Cart Aggregations
+    const cartTotalHT = cart.reduce((sum, item) => sum + item.totalHT, 0);
+    const cartTotalTVA = cart.reduce((sum, item) => sum + item.totalTVA, 0);
+    const cartTotalTTC = cart.reduce((sum, item) => sum + item.totalTTC, 0);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -92,17 +107,22 @@ export const TransactionForm: React.FC<Props> = ({ onClose, onSuccess }) => {
 
         setLoading(true);
         try {
+            // 🚀 The API Payload strictly sends unitPriceHT to lock the backend math
             const res = await client.post('/internal/transactions/batch', {
                 type,
                 clientId: (type === 'SALE_CASH' || type === 'RETURN') ? clientId : undefined,
-                items: cart,
+                items: cart.map(item => ({
+                    productId: item.productId,
+                    quantity: item.quantity,
+                    unitPriceHT: item.priceHT // Forces backend to use snapshot price at time of sale
+                })),
                 paymentMethod: type === 'SALE_CASH' ? paymentMethod : undefined,
                 paymentRef: (paymentMethod === 'CHECK' || paymentMethod === 'TRANSFER') ? paymentRef : undefined
             });
             
             const selectedClient = clients.find(c => c.id === clientId);
             
-            // Trigger Auto-Print (Silo A Style)
+            // Trigger Auto-Print (Legacy Mapping to preserve InternalDeliveryNote.tsx logic)
             setPrintData({
                 id: res.data.ticketId,
                 date: new Date(),
@@ -112,10 +132,10 @@ export const TransactionForm: React.FC<Props> = ({ onClose, onSuccess }) => {
                     sku: item.internalSku,
                     quantity: item.quantity,
                     measureUnit: item.measureUnit,
-                    unitPrice: item.sellingPrice,
-                    total: item.total
+                    unitPrice: item.priceTTC, // Mapped TTC for the physical receipt
+                    total: item.totalTTC
                 })),
-                total: cartTotal,
+                total: cartTotalTTC,
                 isQuote: false,
                 isReturn: type === 'RETURN',
                 paymentMethod: type === 'SALE_CASH' ? paymentMethod : 'N/A',
@@ -133,13 +153,13 @@ export const TransactionForm: React.FC<Props> = ({ onClose, onSuccess }) => {
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[95vh] flex flex-col overflow-hidden animate-in zoom-in-95">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] flex flex-col overflow-hidden animate-in zoom-in-95">
                 
                 {/* HEADER */}
                 <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
                     <div className="flex items-center gap-3">
                         <div className="bg-slate-900 text-white p-2 rounded-lg"><Package size={20}/></div>
-                        <h2 className="text-xl font-black text-slate-800">Saisie Commande (Stock B)</h2>
+                        <h2 className="text-xl font-black text-slate-800">Caisse & Mouvements (Stock B)</h2>
                     </div>
                     <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><X className="text-slate-400"/></button>
                 </div>
@@ -150,13 +170,13 @@ export const TransactionForm: React.FC<Props> = ({ onClose, onSuccess }) => {
                     <div className="w-full md:w-1/2 p-6 border-r border-slate-100 overflow-y-auto">
                         <div className="space-y-6">
                             <div className="grid grid-cols-3 gap-2">
-                                <button type="button" onClick={() => setType('SALE_CASH')} className={`p-3 rounded-xl border flex flex-col items-center gap-2 font-bold text-[10px] transition-all ${type === 'SALE_CASH' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-500 border-slate-200'}`}>
+                                <button type="button" onClick={() => setType('SALE_CASH')} className={`p-3 rounded-xl border flex flex-col items-center gap-2 font-bold text-[10px] transition-all ${type === 'SALE_CASH' ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white text-slate-500 border-slate-200'}`}>
                                     <ArrowUpCircle size={20}/> VENTE
                                 </button>
-                                <button type="button" onClick={() => setType('RESTOCK')} className={`p-3 rounded-xl border flex flex-col items-center gap-2 font-bold text-[10px] transition-all ${type === 'RESTOCK' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-500 border-slate-200'}`}>
+                                <button type="button" onClick={() => setType('RESTOCK')} className={`p-3 rounded-xl border flex flex-col items-center gap-2 font-bold text-[10px] transition-all ${type === 'RESTOCK' ? 'bg-emerald-600 text-white border-emerald-600 shadow-md' : 'bg-white text-slate-500 border-slate-200'}`}>
                                     <ArrowDownCircle size={20}/> ARRIVAGE
                                 </button>
-                                <button type="button" onClick={() => setType('RETURN')} className={`p-3 rounded-xl border flex flex-col items-center gap-2 font-bold text-[10px] transition-all ${type === 'RETURN' ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-slate-500 border-slate-200'}`}>
+                                <button type="button" onClick={() => setType('RETURN')} className={`p-3 rounded-xl border flex flex-col items-center gap-2 font-bold text-[10px] transition-all ${type === 'RETURN' ? 'bg-amber-500 text-white border-amber-500 shadow-md' : 'bg-white text-slate-500 border-slate-200'}`}>
                                     <RotateCcw size={20}/> RETOUR
                                 </button>
                             </div>
@@ -203,7 +223,7 @@ export const TransactionForm: React.FC<Props> = ({ onClose, onSuccess }) => {
                                         value={productId} onChange={e => setProductId(e.target.value)}>
                                         <option value="">-- Sélectionner --</option>
                                         {products.map(p => (
-                                            <option key={p.id} value={p.id}>{p.name} (Stock: {p.quantity})</option>
+                                            <option key={p.id} value={p.id}>{p.name} ({p.priceTTC.toFixed(2)} DH | Stock: {p.quantity})</option>
                                         ))}
                                     </select>
                                 </div>
@@ -230,25 +250,45 @@ export const TransactionForm: React.FC<Props> = ({ onClose, onSuccess }) => {
 
                         <div className="flex-1 overflow-y-auto space-y-2 mb-4 pr-2 custom-scrollbar">
                             {cart.map((item, idx) => (
-                                <div key={idx} className="bg-white p-3 rounded-xl border border-slate-200 flex justify-between items-center animate-in slide-in-from-right-5">
+                                <div key={idx} className="bg-white p-3 rounded-xl border border-slate-200 flex justify-between items-center animate-in slide-in-from-right-5 shadow-sm">
                                     <div>
                                         <p className="font-bold text-sm text-slate-800">{item.name}</p>
-                                        <p className="text-[10px] text-slate-400">{item.quantity} {getUnitLabel(item.measureUnit)} × {item.sellingPrice} MAD</p>
+                                        <p className="text-[10px] text-slate-400">
+                                            {item.quantity} {getUnitLabel(item.measureUnit)} × {item.priceTTC.toFixed(2)} MAD (TTC)
+                                        </p>
                                     </div>
                                     <div className="flex items-center gap-4">
-                                        <p className="font-black text-slate-900 text-sm">{item.total.toLocaleString()} DH</p>
+                                        <div className="text-right">
+                                            <p className="font-black text-slate-900 text-sm">{item.totalTTC.toFixed(2)} DH</p>
+                                            <p className="text-[9px] font-bold text-slate-400 uppercase">HT: {item.totalHT.toFixed(2)}</p>
+                                        </div>
                                         <button onClick={() => removeFromCart(idx)} className="text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={16}/></button>
                                     </div>
                                 </div>
                             ))}
                         </div>
 
+                        {/* 🧮 MASTER ANALYTICS TOTALS BOX */}
                         <div className="bg-slate-900 rounded-2xl p-6 text-white shrink-0 shadow-xl">
-                            <div className="flex justify-between items-end mb-4">
-                                <p className="text-xs font-bold text-slate-400 uppercase">Total Net</p>
-                                <p className="text-3xl font-black">{cartTotal.toLocaleString()} <span className="text-sm">MAD</span></p>
+                            <div className="space-y-1 mb-3">
+                                <div className="flex justify-between items-center text-sm text-slate-400">
+                                    <p>Total HT</p>
+                                    <p className="font-mono">{cartTotalHT.toFixed(2)} MAD</p>
+                                </div>
+                                <div className="flex justify-between items-center text-sm text-slate-400">
+                                    <p>TVA Calculée</p>
+                                    <p className="font-mono">{cartTotalTVA.toFixed(2)} MAD</p>
+                                </div>
                             </div>
-                            <button onClick={handleSubmit} disabled={loading || cart.length === 0} className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl transition-all shadow-lg flex items-center justify-center gap-2">
+                            
+                            <div className="flex justify-between items-end pt-3 border-t border-slate-700 mb-4">
+                                <p className="text-xs font-bold text-emerald-400 uppercase flex items-center gap-1">
+                                    <Calculator size={12}/> NET À PAYER (TTC)
+                                </p>
+                                <p className="text-3xl font-black text-white">{cartTotalTTC.toFixed(2)} <span className="text-sm text-slate-400">MAD</span></p>
+                            </div>
+                            
+                            <button onClick={handleSubmit} disabled={loading || cart.length === 0} className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 active:scale-95">
                                 {loading ? 'Envoi...' : <><Printer size={20}/> VALIDER ET IMPRIMER</>}
                             </button>
                         </div>

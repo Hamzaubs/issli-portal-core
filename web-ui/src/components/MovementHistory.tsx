@@ -1,3 +1,4 @@
+// web-ui/src/components/MovementHistory.tsx
 import React, { useEffect, useState } from 'react';
 import { 
     RefreshCw, ArrowUpRight, ArrowDownLeft, RotateCcw, 
@@ -83,7 +84,20 @@ export const MovementHistory = () => {
 
     const resetFilters = () => { setSearch(''); setStartDate(''); setEndDate(''); setPage(1); };
 
-    const formatMAD = (val: number) => new Intl.NumberFormat('fr-MA', { style: 'currency', currency: 'MAD' }).format(val || 0);
+    const formatMAD = (val: any) => {
+        let num = 0;
+        if (val !== null && val !== undefined) {
+            if (typeof val === 'object') {
+                num = Number(val.toString());
+            } else if (typeof val === 'string') {
+                num = Number(val.replace(/[^0-9.-]+/g, ""));
+            } else {
+                num = Number(val);
+            }
+        }
+        if (isNaN(num)) num = 0;
+        return new Intl.NumberFormat('fr-MA', { style: 'currency', currency: 'MAD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num);
+    };
 
     const toggleExpand = (groupId: string) => {
         const newSet = new Set(expandedGroups);
@@ -110,7 +124,6 @@ export const MovementHistory = () => {
         } catch (error: any) { alert("Erreur suppression devis."); }
     };
 
-    // 🖨️ PERFECT DOCUMENT ROUTING (Removed `isGrouped` flag)
     const handlePrintGroup = (g: MovementGroup) => {
         setPrintTicketData({
             id: g.id,
@@ -118,8 +131,8 @@ export const MovementHistory = () => {
             isReturn: g.type === 'RETURN',
             date: new Date(g.date),
             clientName: g.clientName,
-            paymentMethod: g.paymentMethod, // Passes CASH, CHECK, TRANSFER naturally
-            paymentRef: g.paymentRef,       // Passes the actual check/virement reference!
+            paymentMethod: g.paymentMethod,
+            paymentRef: g.paymentRef,
             items: g.items,
             total: g.totalAmount
         });
@@ -127,12 +140,14 @@ export const MovementHistory = () => {
 
     const getTypeBadge = (type: string) => {
         switch (type) {
+            case 'SALE':
             case 'SALE_CASH': 
             case 'SALE_CREDIT': return <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-blue-50 text-blue-700 text-xs font-bold uppercase"><ArrowUpRight size={12}/> Vente</span>;
             case 'RETURN': return <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-red-50 text-red-700 text-xs font-bold uppercase"><RotateCcw size={12}/> Retour</span>;
             case 'RESTOCK': return <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-emerald-50 text-emerald-700 text-xs font-bold uppercase"><ArrowDownLeft size={12}/> Arrivage</span>;
             case 'QUOTE': return <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-amber-50 text-amber-700 text-xs font-bold uppercase"><FileText size={12}/> Devis</span>;
             case 'ADJUSTMENT': return <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-orange-50 text-orange-700 text-xs font-bold uppercase"><Package size={12}/> Ajustement</span>;
+            case 'PAYMENT': return <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-purple-50 text-purple-700 text-xs font-bold uppercase"><Banknote size={12}/> Paiement</span>;
             default: return <span className="px-2 py-1 rounded bg-slate-100 text-slate-500 text-xs font-bold uppercase">{type}</span>;
         }
     };
@@ -149,7 +164,7 @@ export const MovementHistory = () => {
                 <div className="flex justify-between items-center">
                     <h3 className="font-bold text-slate-800 flex items-center gap-2">
                         Historique Mouvements 
-                        <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full uppercase tracking-wide">STOCK B</span>
+                        <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full uppercase tracking-wide">STOCK GLOBAL</span>
                         <span className="ml-2 text-xs text-slate-400 font-normal">({totalRecords} documents)</span>
                     </h3>
                     <button onClick={fetchHistory} className="p-2 bg-white border border-slate-200 rounded-lg hover:bg-blue-50 hover:text-blue-600 transition-colors">
@@ -325,7 +340,17 @@ export const MovementHistory = () => {
                         </div>
                         <div className="mb-6">
                             <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Quantité à retourner</label>
-                            <input type="number" min="1" max={returnModal.item.quantity - (returnModal.item.returnedQuantity || 0)} value={returnModal.qty} onChange={e => setReturnModal({...returnModal, qty: Number(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 font-bold text-lg text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none" />
+                            <input 
+                                type="number" min="1" 
+                                max={returnModal.item.quantity - (returnModal.item.returnedQuantity || 0)} 
+                                value={returnModal.qty} 
+                                onChange={e => {
+                                    const val = Number(e.target.value);
+                                    const maxAllowed = returnModal.item!.quantity - (returnModal.item!.returnedQuantity || 0);
+                                    setReturnModal({...returnModal, qty: val > maxAllowed ? maxAllowed : val});
+                                }} 
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 font-bold text-lg text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none" 
+                            />
                         </div>
                         <div className="flex gap-3">
                             <button onClick={() => setReturnModal({isOpen: false, item: null, qty: 1, parentType: ''})} className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200">Annuler</button>

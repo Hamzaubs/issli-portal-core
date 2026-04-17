@@ -1,3 +1,4 @@
+// web-ui/src/components/InvoiceTemplate.tsx
 import React from 'react';
 
 interface InvoiceTemplateProps {
@@ -5,7 +6,7 @@ interface InvoiceTemplateProps {
   settings?: any; 
 }
 
-export const InvoiceTemplate = React.forwardRef<HTMLDivElement, InvoiceTemplateProps>(({ data, settings }, ref) => {
+export const InvoiceTemplate = React.forwardRef<HTMLDivElement, InvoiceTemplateProps>(({ data }, ref) => {
   if (!data) return null;
 
   const isQuote = data.type === 'DEVIS';
@@ -15,12 +16,6 @@ export const InvoiceTemplate = React.forwardRef<HTMLDivElement, InvoiceTemplateP
   const clientIce = data.clientIceSnapshot || data.client?.ice || "";
   const clientAddress = data.client?.address || "";
   const clientCity = data.client?.city || "";
-
-  const companyName = settings?.name || "MA SOCIETE";
-  const companyIce = settings?.ice || "";
-  const companyPhone = settings?.phone || "";
-  const companyAddress = settings?.address || "";
-  const companyEmail = settings?.email || "";
 
   const formatMAD = (amount: number) => new Intl.NumberFormat('fr-MA', { style: 'currency', currency: 'MAD' }).format(amount);
 
@@ -33,7 +28,6 @@ export const InvoiceTemplate = React.forwardRef<HTMLDivElement, InvoiceTemplateP
       } 
   };
 
-  // 🧠 THE AGGREGATION ENGINE: Merging identical items for cleaner A4 printing
   const consolidatedItems = data.items.reduce((acc: any[], item: any) => {
       const rate = Number(item.vatRateSnapshot !== undefined ? item.vatRateSnapshot : (item.vatRate || 0.20));
       const price = Number(item.unitPriceHT || item.unitPrice || 0);
@@ -52,22 +46,12 @@ export const InvoiceTemplate = React.forwardRef<HTMLDivElement, InvoiceTemplateP
   const totalVAT = totalTTC - totalHT;
 
   return (
-    <div ref={ref} className="bg-white p-10 max-w-[210mm] mx-auto text-slate-900 font-sans" style={{ minHeight: '297mm' }}>
+    <div ref={ref} className="bg-white px-[15mm] pt-[45mm] pb-[15mm] w-[210mm] mx-auto text-slate-900 font-sans relative" style={{ minHeight: '297mm' }}>
       
-      {/* HEADER */}
-      <div className="flex justify-between items-start border-b-4 border-slate-900 pb-8 mb-8">
-        <div>
-          <h1 className="text-4xl font-black tracking-tight uppercase mb-2">{companyName}</h1>
-          <p className="text-sm font-bold text-slate-500 uppercase tracking-widest">Facture Officielle</p>
-          <div className="mt-4 text-xs font-medium text-slate-600 space-y-1">
-            {companyAddress && <p>{companyAddress}</p>}
-            {companyPhone && <p>Tél: {companyPhone}</p>}
-            {companyEmail && <p>Email: {companyEmail}</p>}
-            {companyIce && <p>ICE: {companyIce}</p>}
-          </div>
-        </div>
+      {/* LETTERHEAD READY HEADER */}
+      <div className="flex justify-end items-start pb-6 mb-8">
         <div className="text-right">
-          <h2 className={`text-5xl font-black uppercase tracking-tighter ${isCredit ? 'text-red-600' : isQuote ? 'text-amber-500' : 'text-blue-600'}`}>
+          <h2 className={`text-5xl font-black uppercase tracking-tighter ${isCredit ? 'text-red-600' : isQuote ? 'text-amber-500' : 'text-slate-800'}`}>
             {isCredit ? 'AVOIR' : isQuote ? 'DEVIS' : 'FACTURE'}
           </h2>
           <p className="text-xl font-bold text-slate-400 mt-2">#{data.reference}</p>
@@ -76,8 +60,8 @@ export const InvoiceTemplate = React.forwardRef<HTMLDivElement, InvoiceTemplateP
       </div>
 
       {/* CLIENT INFO */}
-      <div className="flex justify-end mb-12">
-        <div className="w-1/2 bg-slate-50 p-6 rounded-xl border border-slate-200">
+      <div className="flex justify-start mb-12">
+        <div className="w-[55%] bg-slate-50 p-6 rounded-xl border border-slate-200">
           <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Facturé à</p>
           <h3 className="text-2xl font-black text-slate-900 mb-2">{clientName}</h3>
           <div className="text-sm text-slate-600 space-y-1">
@@ -90,31 +74,31 @@ export const InvoiceTemplate = React.forwardRef<HTMLDivElement, InvoiceTemplateP
 
       {/* ITEMS TABLE */}
       <table className="w-full mb-8">
-        <thead className="bg-slate-900 text-white uppercase text-xs font-bold">
+        <thead className="bg-slate-50 text-slate-700 uppercase text-xs font-bold border-y border-slate-200">
           <tr>
-            <th className="py-3 px-4 text-left rounded-tl-lg">Désignation</th>
+            <th className="py-3 px-4 text-left">Désignation</th>
             <th className="py-3 px-4 text-center">Qté</th>
             <th className="py-3 px-4 text-center">TVA</th> 
             <th className="py-3 px-4 text-right">P.U (HT)</th>
-            <th className="py-3 px-4 text-right rounded-tr-lg">Total (HT)</th>
+            <th className="py-3 px-4 text-right">Total (HT)</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-200">
+        <tbody className="divide-y divide-slate-200 text-xs">
           {consolidatedItems.map((item: any, idx: number) => (
               <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
-                <td className="py-3 px-4 text-sm font-bold text-slate-700">{item.productName}</td>
-                <td className="py-3 px-4 text-center text-sm font-mono">{item.quantity} <span className="text-[10px] text-slate-500">{getUnitLabel(item.measureUnit)}</span></td>
-                <td className="py-3 px-4 text-center text-sm font-mono">{Math.round(item.parsedRate * 100)}%</td>
-                <td className="py-3 px-4 text-right text-sm font-mono">{formatMAD(item.parsedPrice)}</td>
-                <td className="py-3 px-4 text-right text-sm font-bold">{formatMAD(item.quantity * item.parsedPrice)}</td>
+                <td className="py-3 px-4 font-bold text-slate-700">{item.productName}</td>
+                <td className="py-3 px-4 text-center font-mono">{item.quantity} <span className="text-[10px] text-slate-500">{getUnitLabel(item.measureUnit)}</span></td>
+                <td className="py-3 px-4 text-center font-mono">{Math.round(item.parsedRate * 100)}%</td>
+                <td className="py-3 px-4 text-right font-mono">{formatMAD(item.parsedPrice)}</td>
+                <td className="py-3 px-4 text-right font-bold">{formatMAD(item.quantity * item.parsedPrice)}</td>
               </tr>
           ))}
         </tbody>
       </table>
 
       {/* TOTALS */}
-      <div className="flex justify-end">
-        <div className="w-1/2 space-y-2">
+      <div className="flex justify-end mt-auto">
+        <div className="w-[40%] space-y-2">
           <div className="flex justify-between text-sm font-bold text-slate-500 py-2 border-b border-slate-100">
             <span>Total HT</span>
             <span>{formatMAD(totalHT)}</span>
@@ -123,20 +107,19 @@ export const InvoiceTemplate = React.forwardRef<HTMLDivElement, InvoiceTemplateP
             <span>Total TVA</span> 
             <span>{formatMAD(totalVAT)}</span>
           </div>
-          <div className="flex justify-between text-2xl font-black text-slate-900 pt-4">
+          <div className="flex justify-between text-2xl font-black text-slate-900 pt-4 bg-slate-50 p-2 rounded border border-slate-200 mt-2">
             <span>Net à Payer</span>
             <span>{formatMAD(totalTTC)}</span>
           </div>
         </div>
       </div>
 
-      {/* FOOTER */}
-      <div className="absolute bottom-10 left-10 right-10 text-center text-[10px] text-slate-400 uppercase tracking-widest border-t border-slate-100 pt-4">
-        Arrêté la présente facture à la somme de : {formatMAD(totalTTC)}
-        <br/>
-        Merci de votre confiance
+      <div className="mt-8 mb-2 p-3 bg-slate-50 border border-slate-200 rounded text-xs font-bold text-slate-700 text-center">
+          Arrêté {isQuote ? 'le présent devis' : isCredit ? 'le présent avoir' : 'la présente facture'} à la somme de :<br/>
+          <span className="text-sm font-black text-slate-900 mt-1 block uppercase">{formatMAD(totalTTC)}</span>
       </div>
 
+      {/* INTENTIONALLY BLANK BOTTOM FOR PRE-PRINTED FOOTER */}
     </div>
   );
 });

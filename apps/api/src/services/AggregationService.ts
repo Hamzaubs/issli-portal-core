@@ -1,3 +1,4 @@
+// apps/api/src/services/AggregationService.ts
 import { prismaInternal as dbInternal, Prisma, MovementType } from '@marine/db-internal';
 import { prismaLegal as dbLegal } from '@marine/db-legal';
 import { GlobalMetrics } from '@marine/shared-types';
@@ -45,12 +46,10 @@ export const AggregationService = {
       include: { product: true }
     });
 
-    // FIX: Use type-casting to bypass 'clientPayment' error if Prisma isn't fully synced
     const internalDebtPayments = await (dbInternal as any).clientPayment.findMany({
         where: { createdAt: { gte: range.startDate, lte: range.endDate } }
     });
 
-    // Calculate "Argent Dehors" (Total Outstanding Debt) - Silo B Only
     const allClientsB = await dbInternal.clientB.findMany({ select: { balance: true } });
     const totalDueInternal = allClientsB.reduce((acc, c) => acc + SafeMath.toNum(c.balance), 0);
 
@@ -60,7 +59,6 @@ export const AggregationService = {
     let legalRevenue = 0;
     let internalRevenue = 0;
     
-    // Treasury Buckets
     let realCash = 0;
     let checks = 0;
     let pendingDebtNew = 0; 
@@ -84,9 +82,8 @@ export const AggregationService = {
         
         let cost = 0;
         payment.invoice.items.forEach(i => {
-            // FIX: Explicitly cast to Number for arithmetic safety
             const itemCost = Number(SafeMath.toNum(i.unitPurchaseCostSnapshot));
-            const itemQty = Number(i.quantity);
+            const itemQty = Math.abs(Number(i.quantity));
             cost += (itemCost * itemQty);
         });
         const marginRate = invHT > 0 ? ((invHT - cost) / invHT) : 0;
@@ -101,12 +98,11 @@ export const AggregationService = {
     }
 
     for (const refund of legalRefunds) {
-        const ht = SafeMath.toNum(refund.totalHT);
+        const ht = Math.abs(SafeMath.toNum(refund.totalHT));
         let cost = 0; 
         refund.items.forEach(i => {
-            // FIX: Explicitly cast to Number for arithmetic safety
             const itemCost = Number(SafeMath.toNum(i.unitPurchaseCostSnapshot));
-            const itemQty = Number(i.quantity);
+            const itemQty = Math.abs(Number(i.quantity));
             cost += (itemCost * itemQty);
         });
         legalRevenue = SafeMath.sub(legalRevenue, ht);
@@ -117,34 +113,39 @@ export const AggregationService = {
     // --- SILO B ---
     for (const move of internalMovements) {
         if (move.product || move.snapshotProductName) {
-            let revenue = 0;
-            const qty = Number(move.quantity);
-            if (move.amount !== null) revenue = SafeMath.toNum(move.amount);
-            else {
-                const price = move.snapshotSellingPrice ? SafeMath.toNum(move.snapshotSellingPrice) : SafeMath.toNum(move.product?.sellingPrice);
-                revenue = SafeMath.mult(price, qty);
-            }
+            // 🛡️ THE FIX: Schema-aligned Math Abs & HT Fallback
+            const qty = Math.abs(Number(move.quantity));
             
+            // Uses strict priceTTC nomenclature from the new Contracts
+            const rawTTC = Math.abs(move.amount ? SafeMath.toNum(move.amount) : SafeMath.toNum(move.snapshotPriceTTC || move.product?.priceTTC) * qty);
+            
+            let revenueHT = Math.abs(SafeMath.toNum(move.totalHT));
+            if (revenueHT === 0 && rawTTC > 0) {
+                const vatRate = move.snapshotVatRate !== undefined && move.snapshotVatRate !== null ? SafeMath.toNum(move.snapshotVatRate as Prisma.Decimal) : 0.20;
+                revenueHT = rawTTC / (1 + vatRate);
+            }
+
             const costVal = move.snapshotPurchaseCost ? SafeMath.toNum(move.snapshotPurchaseCost) : SafeMath.toNum(move.product?.purchaseCost);
             const cost = SafeMath.mult(costVal, qty);
-            const profit = revenue - cost;
+            const profit = revenueHT - cost;
+            
             const isReturn = move.type === MovementType.RETURN;
             const day = initDay(getDayKey(move.createdAt));
 
             if (isReturn) {
-                internalRevenue = SafeMath.sub(internalRevenue, revenue);
+                internalRevenue = SafeMath.sub(internalRevenue, revenueHT);
                 totalProfits = SafeMath.sub(totalProfits, profit);
-                day.internalRefunds = SafeMath.add(day.internalRefunds, revenue);
-                if (move.paymentMethod === 'CASH') realCash = SafeMath.sub(realCash, revenue);
+                day.internalRefunds = SafeMath.add(day.internalRefunds, rawTTC);
+                if (move.paymentMethod === 'CASH') realCash = SafeMath.sub(realCash, rawTTC);
             } else {
                 salesCount++;
-                internalRevenue = SafeMath.add(internalRevenue, revenue);
+                internalRevenue = SafeMath.add(internalRevenue, revenueHT);
                 totalProfits = SafeMath.add(totalProfits, profit);
-                day.internalSales = SafeMath.add(day.internalSales, revenue);
+                day.internalSales = SafeMath.add(day.internalSales, rawTTC);
                 
-                if (move.paymentMethod === 'CASH') realCash = SafeMath.add(realCash, revenue);
-                else if (move.paymentMethod === 'CHECK') checks = SafeMath.add(checks, revenue);
-                else if (move.paymentMethod === 'CREDIT') pendingDebtNew = SafeMath.add(pendingDebtNew, revenue);
+                if (move.paymentMethod === 'CASH') realCash = SafeMath.add(realCash, rawTTC);
+                else if (move.paymentMethod === 'CHECK') checks = SafeMath.add(checks, rawTTC);
+                else if (move.paymentMethod === 'CREDIT') pendingDebtNew = SafeMath.add(pendingDebtNew, rawTTC);
             }
         }
     }

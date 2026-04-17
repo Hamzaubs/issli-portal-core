@@ -1,3 +1,4 @@
+// web-ui/src/components/Dashboard.tsx
 import React, { useEffect, useState } from 'react';
 import { 
   Search, Plus, ShoppingCart, RotateCcw, Anchor, 
@@ -17,8 +18,16 @@ import { ExecutiveDashboard } from './ExecutiveDashboard';
 import { InternalAssetImport } from './InternalAssetImport';
 
 interface ProductB {
-  id: string; name: string; internalSku: string; purchaseCost: number; sellingPrice: number; quantity: number;
-  measureUnit: string; technicalSpecs?: string;
+  id: string; 
+  name: string; 
+  internalSku: string; 
+  purchaseCost: number; 
+  priceHT: number;      
+  vatRate: number;     
+  priceTTC: number;     
+  quantity: number;
+  measureUnit: string; 
+  technicalSpecs?: string;
 }
 
 interface CartItem {
@@ -64,6 +73,8 @@ export const Dashboard = ({ user }: { user?: any }) => {
   
   const [showImportModal, setShowImportModal] = useState(false);
 
+  const getSellingPrice = (p: ProductB) => Number(p.priceTTC || 0);
+
   const getUnitLabel = (unit?: string) => { 
       switch(unit) { 
           case 'M': return 'm'; 
@@ -107,23 +118,24 @@ export const Dashboard = ({ user }: { user?: any }) => {
     setCart(prev => prev.filter(item => item.product.id !== productId));
   };
 
-  // ✅ 🚨 ADMIN ONLY: Delete Product Controller
   const handleDeleteProduct = async (e: React.MouseEvent, id: string, name: string) => {
-      e.stopPropagation(); // Prevents the card click from adding to cart
+      e.stopPropagation(); 
       if (!window.confirm(`⚠️ SUPPRESSION DÉFINITIVE\n\nVoulez-vous vraiment supprimer le produit "${name}" ?`)) return;
       
       try {
           await client.delete(`/internal/products/${id}`);
           setRefresh(p => p + 1);
-          setCart(prev => prev.filter(item => item.product.id !== id)); // Remove from cart if present
+          setCart(prev => prev.filter(item => item.product.id !== id)); 
       } catch (err: any) {
-          // Typically fails safely if there are foreign key constraints (already used in history)
           alert("Erreur: " + (err.response?.data?.error || "Impossible de supprimer ce produit (il est probablement lié à un historique de mouvement)."));
       }
   };
 
-  const cartTotal = cart.reduce((sum, item) => sum + (item.product.sellingPrice * item.quantity), 0);
-  
+  const cartTotal = cart.reduce((sum, item) => {
+      const lineTotalCents = Math.round(getSellingPrice(item.product) * item.quantity * 100);
+      return sum + lineTotalCents;
+  }, 0) / 100;  
+
   const handleTransaction = async (bypassConfirm: boolean = false) => {
     if (cart.length === 0) return;
     
@@ -133,23 +145,23 @@ export const Dashboard = ({ user }: { user?: any }) => {
         return;
     }
 
-    if ((paymentMethod === 'CHECK' || paymentMethod === 'TRANSFER') && !paymentRef) {
+    if ((paymentMethod === 'CHECK' || paymentMethod === 'TRANSFER') && !paymentRef && !returnMode) {
         alert("⚠️ Veuillez saisir la référence (N° Chèque/Virement).");
         return;
     }
 
-    let type = 'SALE_CASH';
+    let type = paymentMethod === 'CREDIT' ? 'SALE_CREDIT' : 'SALE_CASH'; 
     if (returnMode) type = 'RETURN';
     if (paymentMethod === 'QUOTE') type = 'QUOTE';
 
     for (const item of cart) {
-        if (type === 'SALE_CASH' && item.product.quantity < item.quantity) {
+        if ((type === 'SALE_CASH' || type === 'SALE_CREDIT') && item.product.quantity < item.quantity) {
             alert(`❌ Stock Insuffisant pour ${item.product.name} !\nDisponible : ${item.product.quantity} ${getUnitLabel(item.product.measureUnit)}`);
             return;
         }
     }
 
-    if (!activeClient && (type === 'SALE_CASH' || type === 'RETURN') && !bypassConfirm) {
+    if (!activeClient && (type === 'SALE_CASH' || type === 'SALE_CREDIT' || type === 'RETURN') && !bypassConfirm) {
         setShowAnonymousConfirm(true);
         return; 
     }
@@ -159,8 +171,7 @@ export const Dashboard = ({ user }: { user?: any }) => {
       const batchId = 'TRX-' + Math.random().toString(36).substring(7).toUpperCase();
 
       await client.post('/internal/transactions/batch', { 
-          items: cart.map(i => ({ productId: i.product.id, quantity: i.quantity, unitPrice: i.product.sellingPrice })),
-          userId: currentUser.id, 
+          items: cart.map(i => ({ productId: i.product.id, quantity: i.quantity, unitPrice: getSellingPrice(i.product) })),
           type,
           clientId: activeClient?.id,
           paymentMethod: type === 'QUOTE' ? undefined : paymentMethod,
@@ -177,20 +188,23 @@ export const Dashboard = ({ user }: { user?: any }) => {
           paymentRef, 
           isReturn: returnMode,
           isQuote: type === 'QUOTE',
-          total: cartTotal,
-          items: cart.map(item => ({
-              productName: item.product.name,
-              sku: item.product.internalSku,
-              quantity: item.quantity,
-              unitPrice: item.product.sellingPrice,
-              total: item.product.sellingPrice * item.quantity,
-              measureUnit: item.product.measureUnit
-          }))
+          items: cart.map(item => {
+              const lineTotalCents = Math.round(getSellingPrice(item.product) * item.quantity * 100);
+              return {
+                  productName: item.product.name,
+                  sku: item.product.internalSku,
+                  quantity: item.quantity,
+                  unitPrice: getSellingPrice(item.product),
+                  total: lineTotalCents / 100, 
+                  measureUnit: item.product.measureUnit
+              };
+          })
       });
 
       setCart([]); setPaymentMethod('CASH'); setPaymentRef('');
     } catch (err: any) { 
         alert(err.response?.data?.error || "Erreur transaction"); 
+        if(err.response?.status === 401) window.location.reload(); 
     } finally { setSubmitting(false); }
   };
 
@@ -198,7 +212,7 @@ export const Dashboard = ({ user }: { user?: any }) => {
       return (
           <div className="p-8 max-w-7xl mx-auto min-h-screen bg-slate-50">
               <div className="flex justify-between items-center mb-8">
-                  <div><h1 className="text-2xl font-black text-slate-900 flex items-center gap-3"><PieChart className="text-emerald-600"/> Dashboard Silo B</h1></div>
+                  <div><h1 className="text-2xl font-black text-slate-900 flex items-center gap-3"><PieChart className="text-emerald-600"/> Tableau de Bord Opérationnel</h1></div>
                   <button onClick={() => setViewMode('OPERATIONAL')} className="px-4 py-2 bg-white text-slate-700 font-bold rounded-xl border border-slate-200 hover:bg-slate-50 shadow-sm transition-all"><Anchor size={18}/> Vue Magasin</button>
               </div>
               <ExecutiveDashboard data={statsData} />
@@ -240,9 +254,9 @@ export const Dashboard = ({ user }: { user?: any }) => {
                   {returnMode ? <RotateCcw size={24} /> : <Anchor size={24} />}
               </div>
               <div>
-                  <h1 className="text-xl font-black text-slate-900 uppercase">Marine Ops</h1>
+                  <h1 className="text-xl font-black text-slate-900 uppercase">Terminal de Vente</h1>
                   <p className={`text-[10px] font-bold uppercase tracking-widest ${returnMode ? 'text-red-500' : 'text-emerald-500'}`}>
-                      {returnMode ? 'Mode Retour' : 'Stock & Vente'}
+                      {returnMode ? 'Gestion des Retours' : 'Ventes au Comptoir'}
                   </p>
               </div>
            </div>
@@ -265,7 +279,7 @@ export const Dashboard = ({ user }: { user?: any }) => {
                    </button>
                )}
                {isAdmin && <button onClick={() => { setEditingProduct(null); setShowProductForm(true); }} className="p-2.5 bg-emerald-600 text-white rounded-xl" title="Nouveau Produit"><Plus size={20} /></button>}
-               {isAdmin && <button onClick={() => setViewMode('EXECUTIVE')} className="p-2.5 bg-slate-900 text-white rounded-xl" title="Dashboard Analytique"><PieChart size={20} /></button>}
+               {isAdmin && <button onClick={() => setViewMode('EXECUTIVE')} className="p-2.5 bg-slate-900 text-white rounded-xl" title="Tableau de Bord"><PieChart size={20} /></button>}
            </div>
         </div>
 
@@ -276,7 +290,6 @@ export const Dashboard = ({ user }: { user?: any }) => {
                         <div key={p.id} onClick={() => handleAddToCart(p)} className={`group cursor-pointer bg-white rounded-2xl p-4 border-2 transition-all hover:scale-[1.02] active:scale-95 ${cart.some(item => item.product.id === p.id) ? 'border-emerald-600 shadow-lg' : 'border-transparent shadow-sm'}`}>
                             <div className="flex justify-between items-start mb-2">
                                 <span className="text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded uppercase">{p.internalSku}</span>
-                                {/* ✅ 🚨 ADMIN ONLY: EDIT & DELETE BUTTONS */}
                                 {isAdmin && (
                                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                         <button 
@@ -303,7 +316,7 @@ export const Dashboard = ({ user }: { user?: any }) => {
                             <h3 className="font-bold text-slate-800 text-sm h-10 line-clamp-2">{p.name}</h3>
                             <div className="mt-4 flex justify-between items-end border-t pt-2">
                                 <div><p className="text-[9px] text-slate-400 font-bold uppercase">Stock</p><p className={`text-sm font-black ${p.quantity < 5 ? 'text-red-500' : 'text-slate-700'}`}>{p.quantity} <span className="text-[10px] font-bold text-slate-400">{getUnitLabel(p.measureUnit)}</span></p></div>
-                                <div className="text-lg font-black text-emerald-600">{p.sellingPrice} <span className="text-[9px] text-slate-400">DH</span></div>
+                                <div className="text-lg font-black text-emerald-600">{getSellingPrice(p)} <span className="text-[9px] text-slate-400">DH</span></div>
                             </div>
                         </div>
                     ))}
@@ -340,7 +353,7 @@ export const Dashboard = ({ user }: { user?: any }) => {
                                         <span className="text-sm font-black w-6 text-center">{item.quantity}</span>
                                         <button onClick={() => updateCartQty(item.product.id, 1)} className="text-slate-400 hover:text-emerald-600 transition-colors"><PlusCircle size={18}/></button>
                                     </div>
-                                    <span className="text-sm font-black text-slate-900">{formatMAD(item.product.sellingPrice * item.quantity)}</span>
+                                    <span className="text-sm font-black text-slate-900">{formatMAD(getSellingPrice(item.product) * item.quantity)}</span>
                                 </div>
                             </div>
                         ))}

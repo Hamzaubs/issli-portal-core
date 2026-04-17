@@ -27,9 +27,17 @@ export const InternalAnalytics: React.FC<AnalyticsProps> = ({ onBack }) => {
 
     useEffect(() => { fetchAnalytics(); }, [year]);
 
-    const formatCompact = (n: any) => {
-        const num = Number(n);
-        if (isNaN(num) || num === 0) return "0";
+    // 🛡️ SECURITY FIX: Standardized the NaN Shield for compact formatting
+    const formatCompact = (amount: any) => {
+        let num = 0;
+        if (amount !== null && amount !== undefined) {
+            if (typeof amount === 'object') num = Number(amount.toString());
+            else if (typeof amount === 'string') num = Number(amount.replace(/[^0-9.-]+/g, ""));
+            else num = Number(amount);
+        }
+        if (isNaN(num)) num = 0;
+        if (num === 0) return "0";
+        
         return new Intl.NumberFormat('fr-MA', { 
             notation: "compact", 
             compactDisplay: "short", 
@@ -40,9 +48,14 @@ export const InternalAnalytics: React.FC<AnalyticsProps> = ({ onBack }) => {
     const shortMonths = ["Jan", "Fév", "Mar", "Avr", "Mai", "Juin", "Juil", "Août", "Sep", "Oct", "Nov", "Déc"];
 
     if (loading) return <div className="h-full flex items-center justify-center bg-slate-50"><div className="w-12 h-12 border-4 border-slate-900 border-t-transparent rounded-full animate-spin"></div></div>;
-    if (!data || !data.kpi) return <div className="p-20 text-center text-red-400">Données indisponibles.</div>;
+    if (!data || !data.kpi || !data.metrics) return <div className="p-20 text-center text-red-400">Données indisponibles.</div>;
 
-    const { kpi, charts, alerts } = data;
+    const { kpi, metrics, charts, alerts } = data;
+    
+    // Dynamic KPI fallbacks 
+    const safeTotalRefunds = kpi.totalRefunds ?? (charts.monthly || []).reduce((acc: number, m: any) => acc + Number(m.refunds || 0), 0);
+    
+    // Protection against negative heights in CSS rendering
     const maxVal = Math.max(...(charts.monthly || []).map((m: any) => Math.max(Number(m.revenue || 0), Number(m.collected || 0), Number(m.quotes || 0))), 1000);
 
     return (
@@ -61,14 +74,13 @@ export const InternalAnalytics: React.FC<AnalyticsProps> = ({ onBack }) => {
 
             <div className="no-print mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
-                    {/* ✅ DRILL-DOWN BACK BUTTON */}
                     {onBack && (
                         <button onClick={onBack} className="text-slate-400 hover:text-emerald-700 flex items-center gap-2 mb-2 font-bold text-xs uppercase tracking-wider transition-colors">
                             <ArrowLeft size={14}/> Retour Globale
                         </button>
                     )}
                     <h1 className="text-3xl font-black text-slate-900 flex items-center gap-3 tracking-tight">
-                        <Activity className="text-emerald-700" size={32} /> ANALYTIQUE <span className="text-slate-300 font-light">|</span> <span className="text-emerald-700">STOCK B</span>
+                        <Activity className="text-emerald-700" size={32} /> ANALYTIQUE <span className="text-slate-300 font-light">|</span> <span className="text-emerald-700">STOCK GLOBAL</span>
                     </h1>
                 </div>
                 
@@ -93,7 +105,7 @@ export const InternalAnalytics: React.FC<AnalyticsProps> = ({ onBack }) => {
                         <div className="flex justify-between items-start mb-4">
                             <div>
                                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">CA Magasin Global</p>
-                                <h2 className="text-3xl font-black text-slate-900 mt-1 truncate tracking-tight">{formatCompact(kpi.netRevenue)} <span className="text-sm text-slate-400 font-medium">MAD</span></h2>
+                                <h2 className="text-3xl font-black text-slate-900 mt-1 truncate tracking-tight">{formatCompact(metrics.revenue?.totalTTC || 0)} <span className="text-sm text-slate-400 font-medium">MAD</span></h2>
                             </div>
                             <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg"><ShoppingCart size={20}/></div>
                         </div>
@@ -103,7 +115,7 @@ export const InternalAnalytics: React.FC<AnalyticsProps> = ({ onBack }) => {
                     <div className="bg-white p-6 rounded-2xl border-l-4 border-l-blue-500 shadow-sm print-shadow-none print-break-inside-avoid">
                         <div className="flex justify-between items-start mb-4">
                             <div>
-                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Marge Brute B</p>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Marge Brute Globale</p>
                                 <h2 className="text-3xl font-black text-blue-700 mt-1 truncate tracking-tight">{formatCompact(kpi.grossMargin)} <span className="text-sm text-blue-400 font-medium">MAD</span></h2>
                             </div>
                             <div className="p-2 bg-blue-50 text-blue-600 rounded-lg"><Coins size={20}/></div>
@@ -118,7 +130,7 @@ export const InternalAnalytics: React.FC<AnalyticsProps> = ({ onBack }) => {
                         <div className="flex justify-between items-start mb-4">
                             <div>
                                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Valeur Retours</p>
-                                <h2 className="text-3xl font-black text-rose-700 mt-1 truncate tracking-tight">{formatCompact(kpi.totalRefunds)} <span className="text-sm text-rose-400 font-medium">MAD</span></h2>
+                                <h2 className="text-3xl font-black text-rose-700 mt-1 truncate tracking-tight">{formatCompact(safeTotalRefunds)} <span className="text-sm text-rose-400 font-medium">MAD</span></h2>
                             </div>
                             <div className="p-2 bg-rose-50 text-rose-600 rounded-lg"><ArrowDownRight size={20}/></div>
                         </div>
@@ -129,7 +141,7 @@ export const InternalAnalytics: React.FC<AnalyticsProps> = ({ onBack }) => {
                         <div className="flex justify-between items-start mb-4">
                             <div>
                                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Devis en Attente</p>
-                                <h2 className="text-3xl font-black text-amber-600 mt-1 truncate tracking-tight">{formatCompact(kpi.totalQuotes || 0)} <span className="text-sm text-amber-400 font-medium">MAD</span></h2>
+                                <h2 className="text-3xl font-black text-amber-600 mt-1 truncate tracking-tight">{formatCompact(metrics.pipeline || 0)} <span className="text-sm text-amber-400 font-medium">MAD</span></h2>
                             </div>
                             <div className="p-2 bg-amber-50 text-amber-600 rounded-lg"><FileText size={20}/></div>
                         </div>
@@ -148,7 +160,7 @@ export const InternalAnalytics: React.FC<AnalyticsProps> = ({ onBack }) => {
                             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Trésorerie Réelle</p>
                             <div className="p-1.5 bg-emerald-50 text-emerald-600 rounded"><Activity size={16}/></div>
                         </div>
-                        <h2 className="text-2xl font-black text-slate-900 mt-1">{formatCompact(kpi.collectedCash)} <span className="text-xs text-slate-400 font-medium">MAD</span></h2>
+                        <h2 className="text-2xl font-black text-slate-900 mt-1">{formatCompact(metrics.treasury?.realCash || 0)} <span className="text-xs text-slate-400 font-medium">MAD</span></h2>
                         <p className="text-[10px] mt-2 text-slate-500">Total Encaissé (Espèces / Virement)</p>
                     </div>
 
@@ -157,8 +169,8 @@ export const InternalAnalytics: React.FC<AnalyticsProps> = ({ onBack }) => {
                             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Dette Clients Actives</p>
                             <div className="p-1.5 bg-orange-50 text-orange-600 rounded"><AlertTriangle size={16}/></div>
                         </div>
-                        <h2 className="text-2xl font-black text-orange-600 mt-1">{formatCompact(kpi.periodBalance)} <span className="text-xs text-slate-400 font-medium">MAD</span></h2>
-                        <p className="text-[10px] mt-2 text-slate-500">Créances B à recouvrir</p>
+                        <h2 className="text-2xl font-black text-orange-600 mt-1">{formatCompact(metrics.treasury?.totalDue || 0)} <span className="text-xs text-slate-400 font-medium">MAD</span></h2>
+                        <p className="text-[10px] mt-2 text-slate-500">Créances globales à recouvrir</p>
                     </div>
 
                     <div className="bg-white p-6 rounded-2xl border-b-4 border-b-purple-600 shadow-sm print-shadow-none print-break-inside-avoid bg-purple-50/30">
@@ -166,7 +178,7 @@ export const InternalAnalytics: React.FC<AnalyticsProps> = ({ onBack }) => {
                             <p className="text-[10px] font-bold text-purple-900 uppercase tracking-widest">Valeur Stock Magasin</p>
                             <div className="p-1.5 bg-purple-600 text-white rounded"><Package size={16}/></div>
                         </div>
-                        <h2 className="text-2xl font-black text-purple-700 mt-1">{formatCompact(kpi.stockValue)} <span className="text-xs text-purple-400 font-medium">MAD</span></h2>
+                        <h2 className="text-2xl font-black text-purple-700 mt-1">{formatCompact(metrics.stockValueCost || 0)} <span className="text-xs text-purple-400 font-medium">MAD</span></h2>
                         <p className="text-[10px] mt-2 text-purple-800/60 font-medium">Actif Magasin (Coût PAMP)</p>
                     </div>
                 </div>
@@ -176,7 +188,7 @@ export const InternalAnalytics: React.FC<AnalyticsProps> = ({ onBack }) => {
                 <div className="lg:col-span-2 flex flex-col gap-8 print:mb-8">
                     <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm h-[400px] flex flex-col print-break-inside-avoid">
                         <div className="flex justify-between items-center mb-6">
-                            <h3 className="font-bold text-slate-900 flex items-center gap-2"><BarChart3 size={20} className="text-emerald-700"/> Activité Mensuelle (Silo B)</h3>
+                            <h3 className="font-bold text-slate-900 flex items-center gap-2"><BarChart3 size={20} className="text-emerald-700"/> Activité Mensuelle (Stock Global)</h3>
                             <div className="flex gap-4 text-[10px] font-bold uppercase tracking-widest">
                                 <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-sm bg-emerald-600"></span> Ventes</div>
                                 <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-sm bg-amber-400"></span> Devis</div>
@@ -189,9 +201,10 @@ export const InternalAnalytics: React.FC<AnalyticsProps> = ({ onBack }) => {
                                 const collected = Number(m.collected || 0);
                                 const quotes = Number(m.quotes || 0);
                                 
-                                const hRev = maxVal > 0 ? (revenue / maxVal) * 100 : 0;
-                                const hCol = maxVal > 0 ? (collected / maxVal) * 100 : 0;
-                                const hQuo = maxVal > 0 ? (quotes / maxVal) * 100 : 0;
+                                // 🛡️ Fix to prevent negative heights in CSS if refunds exceed sales
+                                const hRev = maxVal > 0 ? (Math.max(0, revenue) / maxVal) * 100 : 0;
+                                const hCol = maxVal > 0 ? (Math.max(0, collected) / maxVal) * 100 : 0;
+                                const hQuo = maxVal > 0 ? (Math.max(0, quotes) / maxVal) * 100 : 0;
                                 
                                 return (
                                     <div key={i} className="flex-1 flex flex-col items-center justify-end h-full group relative gap-1">
@@ -200,7 +213,7 @@ export const InternalAnalytics: React.FC<AnalyticsProps> = ({ onBack }) => {
                                                 <div className="w-1/3 bg-blue-500 transition-all rounded-t-sm" style={{ height: `${hCol}%` }} title={`Encaissé: ${formatCompact(collected)}`}></div>
                                                 <div className="w-1/3 bg-emerald-600 transition-all rounded-t-sm" style={{ height: `${hRev}%` }} title={`Ventes: ${formatCompact(revenue)}`}></div>
                                             </div>
-                                            <span className="mt-2 text-[10px] font-bold text-slate-400 uppercase">{shortMonths[i]}</span>
+                                        <span className="mt-2 text-[10px] font-bold text-slate-400 uppercase">{shortMonths[i]}</span>
                                     </div>
                                 );
                             })}

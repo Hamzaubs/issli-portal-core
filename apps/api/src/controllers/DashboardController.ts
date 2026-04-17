@@ -1,14 +1,34 @@
+// apps/api/src/controllers/DashboardController.ts
 import { Request, Response } from 'express';
 import { prismaInternal, MovementType, Prisma } from '@marine/db-internal'; 
 import { prismaLegal } from '@marine/db-legal';
 
-// 🛡️ SERIALIZATION HELPER
+// ============================================================================
+// 🧮 CENT-BASED MATH ENGINE & SERIALIZATION
+// ============================================================================
 const toNumber = (val: any) => {
     if (val === null || val === undefined) return 0;
     if (typeof val === 'bigint') return Number(val);
     if (typeof val === 'object' && typeof val.toNumber === 'function') return val.toNumber();
     const parsed = Number(val);
     return isNaN(parsed) ? 0 : parsed;
+};
+
+const safeDecimal = (val: any): Prisma.Decimal => {
+    if (!val) return new Prisma.Decimal(0);
+    return new Prisma.Decimal(Number(val).toFixed(2));
+};
+
+const calculateCentMath = (ht: number, vatRate: number, qty: number = 1) => {
+    const totalHTCents = Math.round(ht * qty * 100);
+    const totalTTCCents = Math.round(totalHTCents * (1 + vatRate));
+    const totalTVACents = totalTTCCents - totalHTCents;
+    
+    return {
+        totalHT: new Prisma.Decimal((totalHTCents / 100).toFixed(2)),
+        totalTTC: new Prisma.Decimal((totalTTCCents / 100).toFixed(2)),
+        totalTVA: new Prisma.Decimal((totalTVACents / 100).toFixed(2))
+    };
 };
 
 const normalize = (str: string | null | undefined) => {
@@ -26,7 +46,7 @@ interface LegalClientMatch {
 export const DashboardController = {
 
   // =========================================
-  // 📈 SILO B ANALYTICS (EXECUTIVE DASHBOARD)
+  // 📈 SILO B ANALYTICS (MASTER DASHBOARD)
   // =========================================
   getInternalAnalytics: async (req: Request, res: Response) => {
       try {
@@ -35,79 +55,115 @@ export const DashboardController = {
           const endDate = new Date(`${year}-12-31T23:59:59.999Z`);
 
           const [products, alerts, debtAgg, movements, topClients] = await Promise.all([
-              prismaInternal.productB.findMany({ select: { quantity: true, purchaseCost: true, sellingPrice: true } }),
+              prismaInternal.productB.findMany({ select: { quantity: true, purchaseCost: true, priceTTC: true } }),
               prismaInternal.productB.findMany({ where: { quantity: { lte: 5 } }, select: { id: true, name: true, quantity: true }, take: 10 }),
               prismaInternal.clientB.aggregate({ _sum: { balance: true } }),
               prismaInternal.stockMovement.findMany({
                   where: { 
                       createdAt: { gte: startDate, lte: endDate },
-                      // 🛡️ CRITICAL FIX: Exclude Legacy Debt from inflating Internal Volume D'Achats
                       snapshotProductName: { not: { contains: '[REPRISE DE DETTE]' } }
                   },
-                  select: { createdAt: true, type: true, amount: true, quantity: true, snapshotPurchaseCost: true, snapshotProductName: true, paymentMethod: true }
+                  select: { createdAt: true, type: true, amount: true, quantity: true, snapshotPurchaseCost: true, snapshotProductName: true, snapshotVatRate: true, paymentMethod: true, totalHT: true, totalTVA: true }
               }),
               prismaInternal.clientB.findMany({ orderBy: { balance: 'desc' }, where: { balance: { gt: 0 } }, take: 5, select: { name: true, phone: true, balance: true } })
           ]);
 
-          let stockValue = 0; let stockPotential = 0;
+          // 🧮 STRICT CENT-MATH AGGREGATION
+          let stockValueCostCents = 0; let stockValuePotentialCents = 0;
           products.forEach(p => { 
               const q = toNumber(p.quantity);
               if (q > 0) {
-                  stockValue += (q * toNumber(p.purchaseCost)); 
-                  stockPotential += (q * toNumber(p.sellingPrice));
+                  stockValueCostCents += Math.round(q * toNumber(p.purchaseCost) * 100); 
+                  stockValuePotentialCents += Math.round(q * toNumber(p.priceTTC) * 100); 
               }
           });
 
-          // 🛡️ Math.max ensures global debt never reads as a negative number on the dashboard
           const periodBalance = Math.max(0, toNumber(debtAgg._sum?.balance));
 
-          let netRevenue = 0; let totalCost = 0; let totalRefunds = 0; let collectedCash = 0; let totalQuotes = 0;
+          // ✅ Master Analytics Architecture Aggregators (In Cents)
+          let netRevenueTTCCents = 0; let netRevenueHTCents = 0; let totalCollectedTVACents = 0;
+          let totalCostCents = 0; let totalRefundsCents = 0; let collectedCashCents = 0; let totalQuotesCents = 0;
+          
           const monthlyStats = Array(12).fill(0).map(() => ({ revenue: 0, collected: 0, refunds: 0, quotes: 0 }));
           const productVolume = new Map<string, number>();
 
           movements.forEach(m => {
               const month = m.createdAt.getMonth(); 
-              const amt = Math.abs(toNumber(m.amount));
-              const cost = toNumber(m.quantity) * toNumber(m.snapshotPurchaseCost);
+              
+              // 🛡️ THE FIX: Bulletproof Math Extractor & Schema Alignment
+              const qty = Math.abs(toNumber(m.quantity));
+              const rawTTC = Math.abs(toNumber(m.amount));
+              let rawHT = Math.abs(toNumber(m.totalHT));
+              
+              if (rawHT === 0 && rawTTC > 0) {
+                  const vatRate = m.snapshotVatRate !== undefined && m.snapshotVatRate !== null ? toNumber(m.snapshotVatRate) : 0.20;
+                  rawHT = rawTTC / (1 + vatRate);
+              }
+
+              const amtTTCCents = Math.round(rawTTC * 100);
+              const amtHTCents = Math.round(rawHT * 100);
+              const amtTVACents = Math.round(Math.abs(toNumber(m.totalTVA)) * 100);
+              const costCents = Math.round((qty * toNumber(m.snapshotPurchaseCost)) * 100);
+              
               const t = m.type;
 
               if (t === 'SALE_CASH' || t === 'SALE_CREDIT') {
-                  netRevenue += amt;
-                  totalCost += cost;
-                  monthlyStats[month].revenue += amt;
-                  if (t === 'SALE_CASH') { collectedCash += amt; monthlyStats[month].collected += amt; }
-                  if (m.snapshotProductName) productVolume.set(m.snapshotProductName, (productVolume.get(m.snapshotProductName) || 0) + toNumber(m.quantity));
+                  netRevenueTTCCents += amtTTCCents;
+                  netRevenueHTCents += amtHTCents;
+                  totalCollectedTVACents += amtTVACents;
+                  totalCostCents += costCents;
+                  monthlyStats[month].revenue += (amtTTCCents / 100);
+                  
+                  if (t === 'SALE_CASH') { collectedCashCents += amtTTCCents; monthlyStats[month].collected += (amtTTCCents / 100); }
+                  if (m.snapshotProductName) productVolume.set(m.snapshotProductName, (productVolume.get(m.snapshotProductName) || 0) + qty);
+              
               } else if (t === 'RETURN') {
-                  totalRefunds += amt;
-                  totalCost -= cost;
-                  monthlyStats[month].refunds += amt;
-                  if (m.paymentMethod === 'CASH' || m.paymentMethod === 'ESPECES') { collectedCash -= amt; monthlyStats[month].collected -= amt; }
+                  totalRefundsCents += amtTTCCents;
+                  netRevenueTTCCents -= amtTTCCents;
+                  netRevenueHTCents -= amtHTCents;
+                  totalCollectedTVACents -= amtTVACents;
+                  totalCostCents -= costCents;
+                  monthlyStats[month].refunds += (amtTTCCents / 100);
+                  
+                  if (m.paymentMethod === 'CASH' || m.paymentMethod === 'ESPECES') { collectedCashCents -= amtTTCCents; monthlyStats[month].collected -= (amtTTCCents / 100); }
               } else if (t === 'PAYMENT') {
-                  collectedCash += amt;
-                  monthlyStats[month].collected += amt;
+                  collectedCashCents += amtTTCCents;
+                  monthlyStats[month].collected += (amtTTCCents / 100);
               } else if (t === 'QUOTE') {
-                  totalQuotes += amt;
-                  monthlyStats[month].quotes += amt;
+                  totalQuotesCents += amtTTCCents;
+                  monthlyStats[month].quotes += (amtTTCCents / 100);
               }
           });
 
           const topProducts = Array.from(productVolume.entries())
               .map(([name, total]) => ({ name, total })).sort((a, b) => b.total - a.total).slice(0, 5);
 
-          const grossMargin = netRevenue - totalCost;
-          const marginRate = netRevenue > 0 ? (grossMargin / netRevenue) * 100 : 0;
+          // 🛡️ ACCOUNTING FIX: Gross Margin = Net Revenue HT - Total Cost
+          const grossMarginCents = netRevenueHTCents - totalCostCents;
+          
+          // Margin Rate uses HT as the base for accurate percentage
+          const marginRate = netRevenueHTCents > 0 ? (grossMarginCents / netRevenueHTCents) * 100 : 0;
 
           res.json({
+              metrics: {
+                  revenue: {
+                      totalTTC: netRevenueTTCCents / 100,
+                      totalHT: netRevenueHTCents / 100,
+                      totalTVA: totalCollectedTVACents / 100,
+                  },
+                  treasury: {
+                      realCash: collectedCashCents / 100,
+                      totalDue: Math.round(periodBalance * 100) / 100,
+                  },
+                  stockValueCost: stockValueCostCents / 100,
+                  stockValuePotential: stockValuePotentialCents / 100,
+                  pipeline: totalQuotesCents / 100
+              },
               kpi: {
-                  netRevenue: Math.round(netRevenue * 100) / 100,
-                  grossMargin: Math.round(grossMargin * 100) / 100,
+                  netRevenue: netRevenueTTCCents / 100,
+                  totalCA: netRevenueTTCCents / 100,
+                  grossMargin: grossMarginCents / 100,
                   marginRate: Math.round(marginRate * 10) / 10,
-                  totalRefunds: Math.round(totalRefunds * 100) / 100,
-                  collectedCash: Math.round(collectedCash * 100) / 100,
-                  periodBalance: Math.round(periodBalance * 100) / 100,
-                  stockValue: Math.round(stockValue * 100) / 100,
-                  stockPotential: Math.round(stockPotential * 100) / 100,
-                  totalQuotes: Math.round(totalQuotes * 100) / 100
               },
               charts: { 
                   monthly: monthlyStats, 
@@ -125,22 +181,51 @@ export const DashboardController = {
   getProducts: async (req: Request, res: Response) => {
     try {
       const products = await prismaInternal.productB.findMany({ orderBy: { name: 'asc' } });
-      const safe = products.map(p => ({ ...p, purchaseCost: toNumber(p.purchaseCost), sellingPrice: toNumber(p.sellingPrice), quantity: toNumber(p.quantity) }));
+      const safe = products.map(p => ({ 
+          ...p, 
+          purchaseCost: toNumber(p.purchaseCost), 
+          priceHT: toNumber(p.priceHT),
+          vatRate: toNumber(p.vatRate),
+          priceTTC: toNumber(p.priceTTC),
+          quantity: toNumber(p.quantity) 
+      }));
       res.json(safe);
     } catch (e) { res.status(500).json({ error: "Erreur chargement produits" }); }
   },
 
   createProduct: async (req: Request, res: Response) => {
     try {
-      const { name, internalSku, purchaseCost, sellingPrice, quantity, measureUnit, technicalSpecs } = req.body;
+      const { name, internalSku, purchaseCost, priceHT, vatRate, quantity, measureUnit, technicalSpecs } = req.body;
       const qty = Number(quantity);
       if (!name || !internalSku) return res.status(400).json({ error: "Nom et SKU obligatoires" });
 
+      const safeVat = Number(vatRate) || 0;
+      const safeHT = Number(priceHT) || 0;
+      const math = calculateCentMath(safeHT, safeVat, 1);
+
       const result = await prismaInternal.$transaction(async (tx) => {
           const product = await tx.productB.create({
-            data: { name, internalSku, purchaseCost: toNumber(purchaseCost), sellingPrice: toNumber(sellingPrice), quantity: qty, measureUnit: measureUnit || 'UNIT', technicalSpecs }
+            data: { 
+                name, internalSku, 
+                purchaseCost: safeDecimal(purchaseCost), 
+                priceHT: math.totalHT, 
+                vatRate: safeDecimal(safeVat), 
+                priceTTC: math.totalTTC, 
+                quantity: qty, 
+                measureUnit: measureUnit || 'UNIT', 
+                technicalSpecs 
+            }
           });
-          if (qty > 0) await tx.stockMovement.create({ data: { productId: product.id, userId: (req as any).user?.id || null, quantity: qty, type: MovementType.RESTOCK, amount: 0, snapshotProductName: product.name } });
+          if (qty > 0) {
+              await tx.stockMovement.create({ 
+                  data: { 
+                      productId: product.id, userId: (req as any).user?.id || null, quantity: qty, type: MovementType.RESTOCK, 
+                      amount: 0, totalHT: 0, totalTVA: 0,
+                      snapshotPriceHT: math.totalHT, snapshotVatRate: safeDecimal(safeVat), snapshotPriceTTC: math.totalTTC,
+                      snapshotProductName: product.name 
+                  } 
+              });
+          }
           return product;
       });
       res.json(result);
@@ -149,13 +234,29 @@ export const DashboardController = {
 
   updateProduct: async (req: Request, res: Response) => {
     try {
-        const { id } = req.params; const { name, purchaseCost, sellingPrice, measureUnit, technicalSpecs } = req.body;
-        await prismaInternal.productB.update({ where: { id }, data: { name, purchaseCost: toNumber(purchaseCost), sellingPrice: toNumber(sellingPrice), measureUnit, technicalSpecs } });
+        const { id } = req.params; 
+        const { name, purchaseCost, priceHT, vatRate, measureUnit, technicalSpecs } = req.body;
+        
+        const safeVat = Number(vatRate) || 0;
+        const safeHT = Number(priceHT) || 0;
+        const math = calculateCentMath(safeHT, safeVat, 1);
+
+        await prismaInternal.productB.update({ 
+            where: { id }, 
+            data: { 
+                name, 
+                purchaseCost: safeDecimal(purchaseCost), 
+                priceHT: math.totalHT, 
+                vatRate: safeDecimal(safeVat), 
+                priceTTC: math.totalTTC, 
+                measureUnit, 
+                technicalSpecs 
+            } 
+        });
         res.json({ success: true });
     } catch (e) { res.status(500).json({ error: "Erreur mise à jour" }); }
   },
 
-  // 🛡️ ERP SAFETY CHECK INJECTED: Blocks 500 errors when attempting to delete products with history
   deleteProduct: async (req: Request, res: Response) => {
       try {
           const { id } = req.params;
@@ -163,7 +264,7 @@ export const DashboardController = {
           
           if (count > 0) {
               return res.status(400).json({ 
-                  error: `Refusé : Ce produit est lié à ${count} transaction(s) dans l'historique. Pour préserver la comptabilité, renommez-le (ex: [OBSOLÈTE]) et mettez son stock à 0 au lieu de le supprimer.` 
+                  error: `Refusé : Ce produit est lié à ${count} transaction(s) dans l'historique. Pour préserver l'analytique Master, renommez-le (ex: [OBSOLÈTE]) et mettez son stock à 0.` 
               });
           }
           
@@ -299,7 +400,9 @@ export const DashboardController = {
          await prismaInternal.$transaction(async (tx) => {
              const product = await tx.productB.findUnique({ where: { id: productId } });
              if (!product) throw new Error("Produit introuvable");
-             const amount = toNumber(product.sellingPrice) * qty;
+             
+             const math = calculateCentMath(toNumber(product.priceHT), toNumber(product.vatRate), qty);
+             const amount = math.totalTTC.toNumber();
              
              let increment = 0;
              if (type === MovementType.SALE_CASH) increment = -qty;
@@ -315,7 +418,17 @@ export const DashboardController = {
              }
 
              await tx.stockMovement.create({
-                 data: { productId, userId: userId || null, clientId: clientId || null, quantity: qty, type, paymentMethod: paymentMethod || 'CASH', amount, snapshotProductName: product.name, snapshotSellingPrice: toNumber(product.sellingPrice), snapshotPurchaseCost: toNumber(product.purchaseCost) }
+                 data: { 
+                     productId, userId: userId || null, clientId: clientId || null, quantity: qty, type, paymentMethod: paymentMethod || 'CASH', 
+                     amount: math.totalTTC, 
+                     totalHT: math.totalHT, 
+                     totalTVA: math.totalTVA,
+                     snapshotProductName: product.name, 
+                     snapshotPriceHT: product.priceHT,
+                     snapshotVatRate: product.vatRate,
+                     snapshotPriceTTC: product.priceTTC,
+                     snapshotPurchaseCost: product.purchaseCost 
+                 }
              });
          });
          res.json({ success: true });
@@ -329,11 +442,74 @@ export const DashboardController = {
              const anyProduct = await tx.productB.findFirst();
              if (!anyProduct) throw new Error("Veuillez créer au moins un produit pour enregistrer un paiement.");
              await tx.stockMovement.create({
-                 data: { type: MovementType.PAYMENT, clientId, amount: new Prisma.Decimal(amount).neg(), quantity: 0, paymentMethod: method, paymentRef: reference, snapshotProductName: note || "Paiement", userId: userId || null, productId: anyProduct.id }
+                 data: { 
+                     type: MovementType.PAYMENT, clientId, amount: new Prisma.Decimal(amount).neg(), quantity: 0, 
+                     paymentMethod: method, paymentRef: reference, snapshotProductName: note || "Paiement", 
+                     userId: userId || null, productId: anyProduct.id,
+                     totalHT: new Prisma.Decimal(0), totalTVA: new Prisma.Decimal(0) 
+                 }
              });
              await tx.clientB.update({ where: { id: clientId }, data: { balance: { decrement: toNumber(amount) } } });
          });
          res.json({ success: true });
      } catch (e) { res.status(500).json({ error: "Erreur paiement" }); }
+  },
+
+  getDailyTill: async (req: Request, res: Response) => {
+      try {
+          const dateParam = req.query.date as string;
+          if (!dateParam) return res.status(400).json({ error: "Date requise" });
+
+          // Establish strict UTC day boundaries for the query
+          const startDate = new Date(`${dateParam}T00:00:00.000Z`);
+          const endDate = new Date(`${dateParam}T23:59:59.999Z`);
+
+          const movements = await prismaInternal.stockMovement.findMany({
+              where: {
+                  createdAt: { gte: startDate, lte: endDate },
+                  // ONLY track physical cash movements
+                  paymentMethod: { in: ['CASH', 'ESPÈCES', 'ESPECES'] }
+              }
+          });
+
+          // 🧮 STRICT CENT-MATH ENGINE
+          let salesCents = 0;
+          let clientPaymentsCents = 0;
+          let supplierPaymentsCents = 0;
+          let returnsCents = 0;
+          let refundsCents = 0; // Cash returned to us from voided supplier purchases
+
+          movements.forEach(m => {
+              // 🛡️ SECURITY FIX: Use safe toNumber() helper to prevent null crashes
+              const amountCents = Math.round(Math.abs(toNumber(m.amount)) * 100);
+
+              // 🛡️ SECURITY FIX: Removed invalid 'SALE' enum
+              if (m.type === 'SALE_CASH') {
+                  salesCents += amountCents; // (+) Inflow
+              } else if (m.type === 'RETURN') {
+                  returnsCents += amountCents; // (-) Outflow to client
+              } else if (m.type === 'PAYMENT') {
+                  if (m.clientId) clientPaymentsCents += amountCents; // (+) Inflow from client debt
+                  else if (m.supplierId) supplierPaymentsCents += amountCents; // (-) Outflow to supplier
+              } else if (m.type === 'ADJUSTMENT' && m.supplierId && toNumber(m.amount) > 0) {
+                  refundsCents += amountCents; // (+) Inflow from voided purchase
+              }
+          });
+
+          // 🧮 WATERFALL CALCULATION
+          const expectedCents = (salesCents + clientPaymentsCents + refundsCents) - (returnsCents + supplierPaymentsCents);
+
+          res.json({
+              sales: salesCents / 100,
+              clientPayments: clientPaymentsCents / 100,
+              supplierPayments: supplierPaymentsCents / 100,
+              returns: returnsCents / 100,
+              refunds: refundsCents / 100,
+              expectedTotal: expectedCents / 100
+          });
+      } catch (error) {
+          console.error("Z-Report Error:", error);
+          res.status(500).json({ error: "Erreur calcul caisse" });
+      }
   }
 };

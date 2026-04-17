@@ -1,6 +1,7 @@
+// web-ui/src/components/PurchasePrint.tsx
 import React, { useRef, useMemo } from 'react';
 import { useReactToPrint } from 'react-to-print';
-import { Printer, X, MapPin, Phone, Mail } from 'lucide-react';
+import { Printer, X } from 'lucide-react';
 
 // 🛡️ CONVERTISSEUR CHIFFRES EN LETTRES (MAD)
 const numberToFrenchWords = (num: number): string => {
@@ -90,7 +91,7 @@ export const PurchasePrint = ({ purchase, onClose }: { purchase: any; onClose: (
         <div className="bg-white border-b border-gray-200 p-4 flex justify-between items-center shadow-sm z-50">
           <div className="flex items-center gap-2 text-slate-700 font-bold">
               <Printer size={20} className="text-indigo-800" /> 
-              <span>APERÇU DOCUMENT (ACHATS)</span>
+              <span>APERÇU SUR PAPIER EN-TÊTE (ACHATS)</span>
           </div>
           <div className="flex gap-3">
             <button onClick={() => handlePrint()} className="flex items-center gap-2 bg-indigo-800 text-white hover:bg-indigo-900 px-6 py-2 rounded-lg font-bold transition-all shadow-lg"><Printer size={18} /> IMPRIMER</button>
@@ -100,37 +101,22 @@ export const PurchasePrint = ({ purchase, onClose }: { purchase: any; onClose: (
 
         {/* PREVIEW */}
         <div className="flex-1 overflow-auto bg-slate-200 p-8 flex justify-center">
-          <div ref={componentRef} className="bg-white w-[210mm] min-h-[297mm] p-[15mm] text-slate-900 relative text-sm shadow-xl flex flex-col">
+          {/* pt-[45mm] allows space for the company's pre-printed letterhead header */}
+          <div ref={componentRef} className="bg-white w-[210mm] min-h-[297mm] px-[15mm] pt-[45mm] pb-[15mm] text-slate-900 relative text-sm shadow-xl flex flex-col">
             <style>{`@media print { @page { size: A4; margin: 0; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }`}</style>
 
-            {/* HEADER - MATCHING YOUR BRANDING */}
-            <div className="flex justify-between items-start mb-8 pb-6 border-b-2 border-slate-900 relative z-10">
-                <div className="w-[60%]">
-                    <div className="mb-4">
-                        <h1 className="text-4xl font-black tracking-tighter text-emerald-800 leading-none print:text-emerald-800">
-                            ISSLI PECHE <span className="text-xl font-medium text-slate-500 tracking-normal ml-1">S.A.R.L</span>
-                        </h1>
-                        <div className="flex items-center gap-2 mt-2">
-                            <div className="h-1.5 w-10 bg-emerald-600 rounded-full print:bg-emerald-600"></div>
-                            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Équipement Marine</span>
-                        </div>
-                    </div>
-                    <div className="text-[10px] text-slate-500 space-y-1 pl-1 border-l-2 border-slate-100">
-                      <div className="flex items-center gap-2 pl-2"><MapPin size={12} className="text-slate-400"/> 19, Rue Bni Aamir - Bourgogne - Casablanca</div>
-                      <div className="flex items-center gap-2 pl-2"><Phone size={12} className="text-slate-400"/> Tél/Fax : +212 5 22 20 51 96</div>
-                      <div className="flex items-center gap-2 pl-2"><Mail size={12} className="text-slate-400"/> isslipeche@yahoo.fr</div>
-                    </div>
-                </div>
+            {/* LETTERHEAD READY HEADER (No Business Info) */}
+            <div className="flex justify-end items-start mb-8 relative z-10">
                 <div className="text-right">
-                  <h2 className={`text-3xl font-light uppercase tracking-wide mb-1 ${isBonCommande ? 'text-indigo-600' : 'text-slate-800'}`}>{title}</h2>
+                  <h2 className={`text-4xl font-light uppercase tracking-wide mb-1 ${isBonCommande ? 'text-indigo-600' : 'text-slate-800'}`}>{title}</h2>
                   <p className="text-slate-900 font-bold text-lg">Réf: {purchase.reference}</p>
                   <p className="text-slate-500 text-xs mt-1">Date : {formatDate(purchase.issuedAt)}</p>
                 </div>
             </div>
 
             {/* SUPPLIER BOX (Replaces Client Box) */}
-            <div className="flex justify-end mb-10 relative z-10">
-                <div className="w-[50%] bg-slate-50 rounded-xl border border-slate-200 p-5 shadow-sm">
+            <div className="flex justify-start mb-10 relative z-10">
+                <div className="w-[55%] bg-slate-50 rounded-xl border border-slate-200 p-5 shadow-sm">
                     <p className="text-[10px] font-bold text-indigo-700 uppercase tracking-widest mb-2 print:text-indigo-700">Fournisseur</p>
                     <h3 className="text-lg font-bold text-slate-900 mb-1">{purchase.supplierNameSnapshot || purchase.supplier?.name}</h3>
                     <div className="text-[11px] text-slate-600 space-y-1">
@@ -195,31 +181,20 @@ export const PurchasePrint = ({ purchase, onClose }: { purchase: any; onClose: (
                 <span className="text-sm font-black text-slate-900 mt-1 block uppercase">{numberToFrenchWords(Math.abs(purchase.totalTTC))}</span>
             </div>
 
-            {/* LEGAL FOOTER */}
+            {/* DOCUMENT SPECIFIC NOTES & SIGNATURE SPACE */}
             <div className="mt-2">
                 {purchase.note && <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded text-xs text-slate-600 italic"><strong>Note:</strong> {purchase.note}</div>}
                 
                 {isBonCommande ? (
                     <div className="flex justify-between mt-6 pt-6 border-t border-slate-200">
                         <div className="w-64 h-24 border border-slate-300 rounded-lg p-3 text-[10px] text-slate-400 font-bold uppercase tracking-widest bg-slate-50/50">
-                            Signature & Cachet (ISSLI PECHE)
+                            Signature & Cachet (Fournisseur)
                         </div>
                     </div>
                 ) : null}
-
-                <div className="text-center text-[8px] text-slate-500 border-t-2 border-emerald-800/20 pt-3 mt-4 leading-relaxed">
-                    <p className="font-bold text-emerald-800 uppercase mb-1 print:text-emerald-800">ISSLI PECHE S.A.R.L - Société à Responsabilité Limitée au capital de 1 500 000 MAD</p>
-                    <div className="flex justify-center gap-3 flex-wrap">
-                        <span><strong>RC:</strong> 124637 (Casablanca)</span><span className="text-slate-300">|</span>
-                        <span><strong>IF:</strong> 1921313</span><span className="text-slate-300">|</span>
-                        <span><strong>ICE:</strong> 001664837000074</span><span className="text-slate-300">|</span>
-                        <span><strong>Patente:</strong> 35420113</span><span className="text-slate-300">|</span>
-                        <span><strong>CNSS:</strong> 6598778</span>
-                    </div>
-                    <p className="mt-1 text-slate-400">19, Rue Bni Aamir - Bourgogne - Casablanca • Maroc</p>
-                </div>
             </div>
 
+            {/* INTENTIONALLY BLANK FOOTER SPACE FOR PRE-PRINTED PAPER */}
           </div>
         </div>
       </div>

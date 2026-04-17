@@ -1,22 +1,22 @@
-// apps/api/seed.mjs
-import bcrypt from 'bcrypt';
+import pkg from 'bcryptjs'; // Use bcryptjs for better compatibility
+const bcrypt = pkg;
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 
-// 1. Setup paths
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const require = createRequire(import.meta.url);
 
-// 2. Load .env from root
+// 1. Load .env from root
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
-// 3. 🛡️ DIRECT PATH IMPORT (Bypasses ESM resolution issues)
-// This points directly to where Prisma generated your Stock B client
-import pkg from '../../node_modules/@marine/db-internal/index.js';
-const { PrismaClient } = pkg;
+// 2. 🛡️ DIRECT GENERATED PATH IMPORT
+// Based on your logs, the client was generated to packages/db-internal/src/generated/client
+const { PrismaClient } = require('../../packages/db-internal/src/generated/client/index.js');
 
-console.log('🔌 Connecting to Local DB...');
+console.log('🔌 Connecting to Internal Database...');
 
 const prisma = new PrismaClient({
   datasources: {
@@ -27,34 +27,47 @@ const prisma = new PrismaClient({
 });
 
 async function main() {
-  console.log('🌱 Generating test users for Localhost...');
+  console.log('🌱 Generating users for Marine Ops...');
   
   const hashedPassword = await bcrypt.hash('admin123', 10);
 
+  // 🚨 AUDIT: These roles MUST match your frontend Dashboard.tsx logic
   const users = [
-    { username: 'admin_test', password: hashedPassword, role: 'SUPER_ADMIN' },
-    { username: 'pos_test', password: hashedPassword, role: 'POS_USER' },
-    { username: 'legal_test', password: hashedPassword, role: 'LEGAL_USER' },
+    { 
+      username: 'admin', 
+      password: hashedPassword, 
+      role: 'SUPER_ADMIN' 
+    },
+    { 
+      username: 'magasinier', 
+      password: hashedPassword, 
+      role: 'POS_USER'  // Changed from CASHIER
+    },
+    { 
+      username: 'comptable', 
+      password: hashedPassword, 
+      role: 'LEGAL_USER' // Changed from LEGAL_ADMIN
+    },
   ];
 
   for (const u of users) {
     const exists = await prisma.user.findUnique({ where: { username: u.username } });
     if (!exists) {
       await prisma.user.create({ data: u });
-      console.log(`✅ Created: ${u.username}`);
+      console.log(`✅ Created: ${u.username} (${u.role})`);
     } else {
       console.log(`⚠️ Skipped: ${u.username} (Already exists)`);
     }
   }
 
   console.log('----------------------------------------');
-  console.log('✅ SUCCESS!');
+  console.log('🚀 SEEDING SUCCESSFUL');
   console.log('----------------------------------------');
 }
 
 main()
   .catch((e) => {
-    console.error('❌ SEED ERROR: Ensure you ran "npx prisma generate" for Silo B first.');
+    console.error('❌ SEED ERROR:');
     console.error(e);
     process.exit(1);
   })

@@ -1,6 +1,6 @@
 // apps/api/src/index.ts
 import 'dotenv/config'; 
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet'; 
 import rateLimit from 'express-rate-limit'; 
@@ -23,15 +23,13 @@ app.use(helmet());
 
 // 🛑 Enterprise CORS Whitelist
 const allowedOrigins = [
-    'http://localhost:5173', // For local React development
-    'http://localhost:3000', // Alternative local port
-    process.env.FRONTEND_URL || 'https://issli-portal-core-web-ui.vercel.app' // Production Web App
+    'http://localhost:5173', 
+    'http://localhost:3000', 
+    process.env.FRONTEND_URL || 'https://issli-portal-core-web-ui.vercel.app' 
 ];
 
 app.use(cors({
     origin: function (origin, callback) {
-        // Allow requests with no origin (Mobile Apps, Postman, server-to-server) 
-        // OR if the origin is explicitly in our whitelist.
         if (!origin || allowedOrigins.includes(origin)) {
             callback(null, true);
         } else {
@@ -39,12 +37,11 @@ app.use(cors({
             callback(new Error('Accès refusé par la politique CORS (Zero-Trust)'));
         }
     },
-    credentials: true, // Required if you ever switch to secure HTTP-only cookies
+    credentials: true, 
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Rate Limiter against brute-force
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000, 
     max: 1000, 
@@ -60,28 +57,44 @@ app.use(express.json());
 // 🚪 PORTAL GATEWAYS & ROUTES
 // ==========================================
 
-// 🔓 Public / Authentication
 app.use('/api/auth', authRoutes);
-
-// 🟦 SILO A: Bureau Légal (Tax Compliance)
-// Access: SUPER_ADMIN & LEGAL_USER strictly.
 app.use('/api/legal', legalRoutes); 
 app.use('/api/clients', clientRoutes); 
 app.use('/api/suppliers', supplierRoutes); 
 app.use('/api/purchases', purchaseRoutes); 
-
-// 🟩 SILO B: Magasin Interne (High-Velocity POS)
-// Access: SUPER_ADMIN & POS_USER strictly.
 app.use('/api/internal', internalRoutes); 
-
-// 🌊 EXECUTIVE BRIDGE: Aggregation & God View
-// Access: SUPER_ADMIN ONLY (Cross-Silo Read Access).
 app.use('/api/dashboard', dashboardRoutes); 
+
+// ==========================================
+// 🚨 GLOBAL ERROR INTERCEPTOR (THE SHIELD)
+// ==========================================
+app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+    console.error(`[GLOBAL ERROR] ${req.method} ${req.url} ->`, err.message);
+
+    // Prisma-specific error handling
+    if (err.code === 'P2002') {
+        return res.status(409).json({ error: "Conflit : Cette donnée existe déjà (Nom, Téléphone, ou ICE en doublon)." });
+    }
+    if (err.code === 'P2003') {
+        return res.status(403).json({ error: "Action refusée : Cette ressource est liée à d'autres documents dans l'historique." });
+    }
+    if (err.code === 'P2025') {
+        return res.status(404).json({ error: "La ressource demandée est introuvable ou a déjà été supprimée." });
+    }
+    
+    // CORS Error fallback
+    if (err.message.includes('CORS')) {
+        return res.status(403).json({ error: "Accès refusé : Origine non autorisée." });
+    }
+
+    // Generic server fallback
+    res.status(500).json({ error: "Erreur interne du serveur. Veuillez contacter l'administrateur." });
+});
 
 // ==========================================
 // 🚀 SERVER IGNITION
 // ==========================================
 app.listen(PORT, () => {
   console.log(`✅ API PORTAIL ISSLI EN LIGNE : http://localhost:${PORT}`);
-  console.log(`🛡️ Statut : SÉCURITÉ ZÉRO-CONFIANCE ACTIVE (Limiteur de requêtes & Bouclier Contextuel)`);
+  console.log(`🛡️ Statut : SÉCURITÉ ZÉRO-CONFIANCE ACTIVE (Limiteur de requêtes, Bouclier Contextuel & Intercepteur d'erreurs)`);
 });

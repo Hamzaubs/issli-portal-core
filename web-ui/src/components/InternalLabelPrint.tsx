@@ -4,10 +4,13 @@ import { useReactToPrint } from 'react-to-print';
 import { X, Printer, Tag, Box, Ruler, Weight, Droplets } from 'lucide-react';
 import { Logo } from './Logo';
 
+// 🛡️ STRICT CONTRACT ALIGNMENT
 interface ProductB { 
   name: string; 
   internalSku: string; 
-  sellingPrice: number;
+  priceHT: number;      
+  vatRate: number;     
+  priceTTC: number; // ⬅️ The New Standard
   measureUnit: string; 
   technicalSpecs?: string;
 }
@@ -67,7 +70,8 @@ export const InternalLabelPrint: React.FC<InternalLabelPrintProps> = ({ product,
                     <div className="text-[8px] font-bold text-slate-400 leading-tight">ISSLI PECHE<br/>(STOCK B)</div>
                 </div>
                 <div className="text-right">
-                    <span className="text-3xl font-black text-slate-900">{product.sellingPrice}</span>
+                    {/* 🧮 Strictly read priceTTC and cast as Number to prevent rendering undefined */}
+                    <span className="text-3xl font-black text-slate-900">{Number(product.priceTTC || 0)}</span>
                     <span className="text-xs font-bold text-slate-500 ml-1">DH {getPriceSuffix(product.measureUnit)}</span>
                 </div>
             </div>

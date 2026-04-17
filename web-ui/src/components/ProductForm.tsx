@@ -1,5 +1,6 @@
+// web-ui/src/components/ProductForm.tsx
 import React, { useState, useEffect } from 'react';
-import { X, Save, Package, Ruler, Weight, Droplets, Box, Tag, FileText, AlertCircle } from 'lucide-react';
+import { X, Save, Package, Ruler, Weight, Droplets, Box, Tag, FileText, AlertCircle, Calculator } from 'lucide-react';
 import client from '../api/client';
 
 interface Props {
@@ -12,25 +13,29 @@ export const ProductForm: React.FC<Props> = ({ initialData, onCancel, onSuccess 
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // ✅ BIG DATA SAFETY: Use Strings for inputs to prevent floating point UI glitches
+    // ✅ BIG DATA SAFETY & TVA ENGINE: Strings prevent floating point UI glitches during typing
     const [formData, setFormData] = useState({
         name: '',
         internalSku: '',
-        purchaseCost: '',  // String to allow "0.00" typing
-        sellingPrice: '',  // String to allow "0.00" typing
-        quantity: '',      // String
+        purchaseCost: '',  
+        priceHT: '',       
+        vatRate: '0.20',   // Default 20%
+        priceTTC: '',      
+        quantity: '',      
         measureUnit: 'UNIT',
         technicalSpecs: ''
     });
 
-    // ✅ Load Initial Data (Convert numbers to strings for the UI)
+    // ✅ Load Initial Data (Map backend Cent-math values to UI strings)
     useEffect(() => {
         if (initialData) {
             setFormData({
                 name: initialData.name || '',
                 internalSku: initialData.internalSku || '',
                 purchaseCost: initialData.purchaseCost?.toString() || '',
-                sellingPrice: initialData.sellingPrice?.toString() || '',
+                priceHT: initialData.priceHT?.toString() || '',
+                vatRate: initialData.vatRate?.toString() || '0.20',
+                priceTTC: initialData.priceTTC?.toString() || '',
                 quantity: initialData.quantity?.toString() || '',
                 measureUnit: initialData.measureUnit || 'UNIT',
                 technicalSpecs: initialData.technicalSpecs || ''
@@ -38,39 +43,68 @@ export const ProductForm: React.FC<Props> = ({ initialData, onCancel, onSuccess 
         }
     }, [initialData]);
 
+    // ========================================================================
+    // 🧮 STRICT CENT-BASED BIDIRECTIONAL MATH ENGINE (HT <-> TTC)
+    // ========================================================================
+    const handleHTChange = (val: string) => {
+        const ht = parseFloat(val) || 0;
+        const vat = parseFloat(formData.vatRate) || 0;
+        // Strict cent-math prevents 19.999999 drift
+        const ttc = (Math.round(ht * (1 + vat) * 100) / 100).toFixed(2);
+        setFormData(prev => ({ ...prev, priceHT: val, priceTTC: val === '' ? '' : ttc }));
+    };
+
+    const handleTTCChange = (val: string) => {
+        const ttc = parseFloat(val) || 0;
+        const vat = parseFloat(formData.vatRate) || 0;
+        const ht = (Math.round((ttc / (1 + vat)) * 100) / 100).toFixed(2);
+        setFormData(prev => ({ ...prev, priceTTC: val, priceHT: val === '' ? '' : ht }));
+    };
+
+    const handleVatChange = (val: string) => {
+        const vat = parseFloat(val) || 0;
+        const ht = parseFloat(formData.priceHT) || 0;
+        const ttc = (Math.round(ht * (1 + vat) * 100) / 100).toFixed(2);
+        setFormData(prev => ({ ...prev, vatRate: val, priceTTC: formData.priceHT === '' ? '' : ttc }));
+    };
+
+    // ========================================================================
+    // 🚀 SUBMISSION HANDLER
+    // ========================================================================
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
         setError(null);
 
-        // 1. Validation Logic
         const cost = parseFloat(formData.purchaseCost) || 0;
-        const price = parseFloat(formData.sellingPrice) || 0;
+        const ht = parseFloat(formData.priceHT) || 0;
+        const vat = parseFloat(formData.vatRate) || 0;
+        const ttc = parseFloat(formData.priceTTC) || 0;
         const qty = parseInt(formData.quantity) || 0;
 
-        if (cost < 0 || price < 0) {
+        if (cost < 0 || ht < 0) {
             setError("Les prix ne peuvent pas être négatifs.");
             setLoading(false);
             return;
         }
 
-        // 2. Prepare Payload (Send strict types)
+        // 🛡️ STRICT PAYLOAD ALIGNMENT: We explicitly send priceTTC
         const payload = {
             ...formData,
-            purchaseCost: cost,
-            sellingPrice: price,
+            purchaseCost: Math.round(cost * 100) / 100,
+            priceHT: Math.round(ht * 100) / 100,
+            vatRate: vat,
+            priceTTC: Math.round(ttc * 100) / 100, // Explicit TTC transmission
             quantity: qty
         };
 
         try {
             if (initialData && initialData.id) {
-                // 🔄 UPDATE
                 await client.put(`/internal/products/${initialData.id}`, payload);
             } else {
-                // 🌍 CREATE
                 await client.post('/internal/products', payload);
             }
-            onSuccess(); // Close and Refresh
+            onSuccess();
         } catch (error: any) {
             console.error(error);
             setError(error.response?.data?.error || "Erreur de connexion serveur");
@@ -102,7 +136,7 @@ export const ProductForm: React.FC<Props> = ({ initialData, onCancel, onSuccess 
                             {initialData ? 'Modifier le Produit' : 'Nouveau Produit'}
                         </h2>
                         <p className="text-slate-500 text-sm mt-1 font-medium pl-1">
-                            Gestion du <span className="font-bold text-emerald-600">STOCK B (Interne)</span>
+                            Gestion du <span className="font-bold text-emerald-600">STOCK B</span>
                         </p>
                     </div>
                     <button onClick={onCancel} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
@@ -159,34 +193,61 @@ export const ProductForm: React.FC<Props> = ({ initialData, onCancel, onSuccess 
                         </div>
                     </div>
 
-                    <div className="p-6 bg-emerald-50/30 rounded-2xl border border-emerald-100/50">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    {/* 💰 FINANCIAL ENGINE SECTION */}
+                    <div className="p-6 bg-slate-50 rounded-2xl border border-slate-200 space-y-6">
+                        
+                        {/* Row 1: Stock & Achat */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div>
-                                <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">Prix Achat</label>
+                                <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">Coût d'Achat Réel (HT/TTC confondu)</label>
                                 <input required type="number" min="0" step="0.01"
                                     className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-700 outline-none focus:border-slate-400"
-                                    value={formData.purchaseCost} 
-                                    onChange={e => setFormData({...formData, purchaseCost: e.target.value})}
+                                    value={formData.purchaseCost} onChange={e => setFormData({...formData, purchaseCost: e.target.value})}
                                     placeholder="0.00"
                                 />
                             </div>
                             <div>
-                                <label className="text-xs font-black text-emerald-600 uppercase mb-2 block">Prix Vente {getUnitLabel()}</label>
-                                <input required type="number" min="0" step="0.01"
-                                    className="w-full px-4 py-3 bg-white border-2 border-emerald-200 rounded-xl font-bold text-emerald-700 outline-none focus:border-emerald-500 shadow-sm"
-                                    value={formData.sellingPrice} 
-                                    onChange={e => setFormData({...formData, sellingPrice: e.target.value})}
-                                    placeholder="0.00"
-                                />
-                            </div>
-                            <div>
-                                <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">Stock Physique</label>
+                                <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">Stock Physique Actuel</label>
                                 <input type="number" min="0"
                                     className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-700 outline-none focus:border-emerald-500"
-                                    value={formData.quantity} 
-                                    onChange={e => setFormData({...formData, quantity: e.target.value})}
+                                    value={formData.quantity} onChange={e => setFormData({...formData, quantity: e.target.value})}
                                     placeholder="0"
                                 />
+                            </div>
+                        </div>
+
+                        {/* Row 2: Vente (The TVA Engine) */}
+                        <div className="bg-white p-5 rounded-xl border-2 border-emerald-100 shadow-sm relative">
+                            <div className="absolute -top-3 left-4 bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-1 rounded-md uppercase tracking-wider flex items-center gap-1">
+                                <Calculator size={12}/> Calculatrice de Vente
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+                                <div>
+                                    <label className="text-[11px] font-bold text-slate-400 uppercase mb-2 block">Prix Vente HT</label>
+                                    <input required type="number" min="0" step="0.01"
+                                        className="w-full px-3 py-3 bg-slate-50 border border-slate-200 rounded-lg font-bold text-slate-700 outline-none focus:border-emerald-500 focus:bg-white"
+                                        value={formData.priceHT} onChange={e => handleHTChange(e.target.value)} placeholder="0.00"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-[11px] font-bold text-slate-400 uppercase mb-2 block">Taux TVA</label>
+                                    <select 
+                                        className="w-full px-3 py-3 bg-slate-50 border border-slate-200 rounded-lg font-bold text-slate-700 outline-none focus:border-emerald-500 cursor-pointer"
+                                        value={formData.vatRate} onChange={e => handleVatChange(e.target.value)}
+                                    >
+                                        <option value="0">0% (Exonéré)</option>
+                                        <option value="0.10">10%</option>
+                                        <option value="0.14">14%</option>
+                                        <option value="0.20">20%</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="text-[11px] font-black text-emerald-600 uppercase mb-2 block">Prix {getUnitLabel()} TTC</label>
+                                    <input required type="number" min="0" step="0.01"
+                                        className="w-full px-3 py-3 bg-emerald-50/50 border-2 border-emerald-200 rounded-lg font-black text-emerald-700 outline-none focus:border-emerald-500 focus:bg-white transition-colors"
+                                        value={formData.priceTTC} onChange={e => handleTTCChange(e.target.value)} placeholder="0.00"
+                                    />
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -195,7 +256,7 @@ export const ProductForm: React.FC<Props> = ({ initialData, onCancel, onSuccess 
                         <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block flex items-center gap-2">
                             <FileText size={14}/> Fiche Technique
                         </label>
-                        <textarea rows={3} placeholder="Notes..." 
+                        <textarea rows={3} placeholder="Notes ou spécifications internes..." 
                             className="w-full p-4 bg-slate-50 border-none rounded-xl text-sm font-medium text-slate-600 outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
                             value={formData.technicalSpecs} onChange={e => setFormData({...formData, technicalSpecs: e.target.value})}
                         />
@@ -209,7 +270,7 @@ export const ProductForm: React.FC<Props> = ({ initialData, onCancel, onSuccess 
                     </div>
                     <div className="flex gap-3">
                         <button onClick={onCancel} className="px-6 py-3 font-bold text-slate-500 hover:bg-slate-200 rounded-xl">Annuler</button>
-                        <button onClick={handleSubmit} disabled={loading} className="px-8 py-3 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl shadow-lg shadow-emerald-200 flex items-center gap-2">
+                        <button onClick={handleSubmit} disabled={loading} className="px-8 py-3 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl shadow-lg shadow-emerald-200 flex items-center gap-2 transition-transform active:scale-95">
                             {loading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"/> : <Save size={20}/>}
                             {initialData ? 'Mettre à jour' : 'Enregistrer'}
                         </button>

@@ -1,8 +1,9 @@
+// web-ui/src/components/ClientProfile.tsx
 import React, { useEffect, useState, useMemo } from 'react';
 import { 
     X, Phone, Printer, ShieldAlert, PieChart, CheckCircle2,
     Loader2, Banknote, User, Wallet, RotateCcw, Trash2,
-    ArrowUpRight, FileText, ChevronDown, ChevronUp, ShoppingCart, History
+    ArrowUpRight, FileText, ChevronDown, ChevronUp, ShoppingCart, History, ArrowDownLeft
 } from 'lucide-react';
 import client from '../api/client';
 import { ClientStatement } from './ClientStatement';
@@ -21,13 +22,14 @@ const InternalPaymentModal: React.FC<{
     onClose: () => void, onSuccess: () => void 
 }> = ({ clientId, maxAmount, clientName, targetTicket, onClose, onSuccess }) => {
     
-    const ticketTotal = targetTicket?.groupTotal ?? targetTicket?.amount ?? 0;
-    const ticketReturned = targetTicket?.groupReturnedValue ?? (((targetTicket?.amount || 0) / (targetTicket?.quantity || 1)) * (targetTicket?.returnedQuantity || 0));
+    // 🧮 STRICT CENT-MATH
+    const ticketTotalCents = Math.round((targetTicket?.groupTotal ?? targetTicket?.amount ?? 0) * 100);
+    const ticketReturnedCents = targetTicket?.groupReturnedCents ?? 
+        Math.round(((Math.round((targetTicket?.amount || 0) * 100) / (targetTicket?.quantity || 1)) * (targetTicket?.returnedQuantity || 0)));
+    const ticketPaidCents = Math.round((targetTicket?.groupPaid ?? targetTicket?.paid ?? 0) * 100);
     
-    const ticketPaid = targetTicket?.groupPaid ?? targetTicket?.paid ?? 0;
-    const ticketDue = ticketTotal - ticketReturned - ticketPaid;
-
-    const defaultAmount = targetTicket ? ticketDue : maxAmount;
+    const ticketDue = (ticketTotalCents - ticketReturnedCents - ticketPaidCents) / 100;
+    const defaultAmount = targetTicket ? Math.max(0, ticketDue) : maxAmount;
     
     const [amount, setAmount] = useState<number | string>(defaultAmount);
     const [method, setMethod] = useState('CASH');
@@ -174,14 +176,20 @@ export const ClientProfile: React.FC<Props> = ({ clientId, onClose }) => {
     useEffect(() => { loadProfile(); loadHistory(1, true); }, [clientId]); 
     useEffect(() => { loadHistory(1, true); }, [filterType]);
 
+    // 🧮 STRICT CENT-MATH GROUPING ENGINE
     const groupedHistory = useMemo(() => {
         const groups = new Map();
         history.forEach(m => {
             const timeKey = new Date(m.date).toISOString().substring(0, 16); 
-            const isGroupable = m.type === 'SALE_CASH' || m.type === 'SALE_CREDIT' || m.type === 'DELIVERY';
+            const isGroupable = m.type === 'SALE' || m.type === 'SALE_CASH' || m.type === 'SALE_CREDIT' || m.type === 'DELIVERY';
             const key = isGroupable ? `${timeKey}-${m.type}` : m.id;
 
-            const returnedValue = (((m.amount || 0) / (m.quantity || 1)) * (m.returnedQuantity || 0));
+            const amountCents = Math.round(Number(m.amount || 0) * 100);
+            const paidCents = Math.round(Number(m.paid || 0) * 100);
+            const qty = Number(m.quantity || 1);
+            const retQty = Number(m.returnedQuantity || 0);
+            
+            const returnedCents = Math.round((amountCents / qty) * retQty);
 
             if (!groups.has(key)) {
                 groups.set(key, { 
@@ -190,17 +198,24 @@ export const ClientProfile: React.FC<Props> = ({ clientId, onClose }) => {
                     realId: m.id,
                     isGroup: false, 
                     subItems: [m], 
-                    groupTotal: Number(m.amount || 0),
-                    groupPaid: Number(m.paid || 0),
-                    groupReturnedValue: returnedValue
+                    groupTotalCents: amountCents,
+                    groupPaidCents: paidCents,
+                    groupReturnedCents: returnedCents,
+                    groupTotal: amountCents / 100,
+                    groupPaid: paidCents / 100,
+                    groupReturnedValue: returnedCents / 100
                 });
             } else {
                 const existing = groups.get(key);
                 existing.isGroup = true;
                 existing.subItems.push(m);
-                existing.groupTotal += Number(m.amount || 0);
-                existing.groupPaid += Number(m.paid || 0);
-                existing.groupReturnedValue += returnedValue;
+                existing.groupTotalCents += amountCents;
+                existing.groupPaidCents += paidCents;
+                existing.groupReturnedCents += returnedCents;
+                
+                existing.groupTotal = existing.groupTotalCents / 100;
+                existing.groupPaid = existing.groupPaidCents / 100;
+                existing.groupReturnedValue = existing.groupReturnedCents / 100;
             }
         });
         return Array.from(groups.values());
@@ -230,7 +245,7 @@ export const ClientProfile: React.FC<Props> = ({ clientId, onClose }) => {
             sku: s.sku || s.id.substring(0,8),
             quantity: s.quantity || 0,
             measureUnit: s.measureUnit || '-',
-            unitPrice: Math.abs(s.amount / (s.quantity || 1)),
+            unitPrice: Math.round((Number(s.amount) * 100) / (s.quantity || 1)) / 100,
             total: Number(s.amount)
         }));
         setPrintData({
@@ -250,13 +265,14 @@ export const ClientProfile: React.FC<Props> = ({ clientId, onClose }) => {
         if (m.type === 'PAYMENT') {
             setPaymentPrintData({
                 id: m.id, date: new Date(m.date), clientName: profile?.name || 'Client', amount: Math.abs(m.amount),
-                method: m.paymentMethod || 'CASH', reference: m.paymentRef, note: m.productName, context: 'MAGASIN INTERNE (SILO B)' 
+                method: m.paymentMethod || 'CASH', reference: m.paymentRef, note: m.productName, context: 'MAGASIN INTERNE' 
             });
             return;
         }
         setPrintData({
             id: m.id.substring(0, 8).toUpperCase(), productName: m.productName.replace('Vente - ', ''), 
-            sku: m.sku, quantity: m.quantity, measureUnit: m.measureUnit, unitPrice: Math.abs(m.amount / (m.quantity || 1)), 
+            sku: m.sku, quantity: m.quantity, measureUnit: m.measureUnit, 
+            unitPrice: Math.round((Math.abs(m.amount) * 100) / (m.quantity || 1)) / 100, 
             total: Math.abs(m.amount), date: new Date(m.date), clientName: profile?.name, 
             paymentMethod: m.paymentMethod, paymentRef: m.paymentRef, isReturn: m.type === 'RETURN', isQuote: m.type === 'QUOTE'
         });
@@ -264,11 +280,15 @@ export const ClientProfile: React.FC<Props> = ({ clientId, onClose }) => {
 
     const formatMAD = (n: number) => new Intl.NumberFormat('fr-MA', { style: 'currency', currency: 'MAD' }).format(n);
 
+    // 🛡️ FULL FRENCH TRANSLATION BADGES
     const getTypeBadge = (type: string) => {
         switch (type) {
-            case 'SALE_CASH': case 'SALE_CREDIT': return <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-emerald-100 flex items-center gap-1 w-fit"><ArrowUpRight size={10}/>Vente</span>;
+            case 'SALE':
+            case 'SALE_CASH': 
+            case 'SALE_CREDIT': return <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-emerald-100 flex items-center gap-1 w-fit"><ArrowUpRight size={10}/>Vente</span>;
             case 'RETURN': return <span className="text-red-700 bg-red-50 px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-red-100 flex items-center gap-1 w-fit"><RotateCcw size={10}/>Retour</span>;
-            case 'PAYMENT': return <span className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-blue-100 flex items-center gap-1 w-fit"><Banknote size={10}/>Paiement</span>;
+            case 'RESTOCK': return <span className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-blue-100 flex items-center gap-1 w-fit"><ArrowDownLeft size={10}/>Arrivage</span>;
+            case 'PAYMENT': return <span className="text-purple-700 bg-purple-50 px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-purple-100 flex items-center gap-1 w-fit"><Banknote size={10}/>Paiement</span>;
             case 'QUOTE': return <span className="text-amber-700 bg-amber-50 px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-amber-100 flex items-center gap-1 w-fit"><FileText size={10}/>Devis</span>;
             default: return <span>{type}</span>;
         }
@@ -284,7 +304,6 @@ export const ClientProfile: React.FC<Props> = ({ clientId, onClose }) => {
     
     if (showStatement) return <ClientStatement clientId={clientId} onClose={() => setShowStatement(false)} silo="internal" />;
 
-    // ✅ Cleaned up Math: Floors at 0, no Avoir badge.
     const activeDebt = Math.max(0, profile?.balance || 0);
 
     return (
@@ -299,7 +318,7 @@ export const ClientProfile: React.FC<Props> = ({ clientId, onClose }) => {
                             <div className="flex items-center gap-4 text-sm text-slate-500 mt-1">
                                 {profile?.phone && <span className="flex items-center gap-1"><Phone size={14}/> {profile.phone}</span>}
                                 {profile?.ice && <span className="flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded text-xs font-mono border border-slate-200">ICE: {profile.ice}</span>}
-                                <span className="text-xs bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded uppercase tracking-wider">Client Stock B</span>
+                                <span className="text-xs bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded uppercase tracking-wider">Client Stock Global</span>
                             </div>
                         </div>
                     </div>
@@ -317,7 +336,7 @@ export const ClientProfile: React.FC<Props> = ({ clientId, onClose }) => {
                     <div className="bg-white p-6 flex flex-col justify-between group relative overflow-hidden col-span-2">
                         <div className="flex justify-between items-start relative z-10">
                             <div>
-                                <p className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><Wallet size={12}/> Dette Active (Interne)</p>
+                                <p className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1"><Wallet size={12}/> Créance Active </p>
                                 <p className={`text-4xl font-black mt-2 ${activeDebt > 0 ? 'text-red-600' : 'text-slate-800'}`}>{formatMAD(activeDebt)}</p>
                             </div>
                             
@@ -357,15 +376,11 @@ export const ClientProfile: React.FC<Props> = ({ clientId, onClose }) => {
                       {groupedHistory.map((g, idx) => {
                           const isExpanded = expandedGroups.has(g.id);
                           
-                          const paid = g.groupPaid;
-                          const total = g.groupTotal;
-                          const effectiveTotal = total - g.groupReturnedValue;
+                          const remainingCents = Math.max(0, g.groupTotalCents - g.groupReturnedCents - g.groupPaidCents);
+                          const remaining = remainingCents / 100;
                           
-                          // ✅ Cleaned up logic: Math.max ensures we just bottom out at 0
-                          const remaining = Math.max(0, effectiveTotal - paid);
-                          
-                          const isPartial = paid > 0 && remaining > 0.05;
-                          const isFullyPaid = remaining <= 0.05;
+                          const isPartial = g.groupPaidCents > 0 && remainingCents > 5;
+                          const isFullyPaid = remainingCents <= 5;
 
                           const canReturnGroup = g.isGroup
                                 ? g.subItems.some((s: any) => s.type !== 'RETURN' && s.quantity > (s.returnedQuantity || 0))
@@ -382,9 +397,9 @@ export const ClientProfile: React.FC<Props> = ({ clientId, onClose }) => {
                                                   {g.isGroup && (isExpanded ? <ChevronUp size={16} className="text-emerald-500"/> : <ChevronDown size={16} className="text-slate-400"/>)}
                                                   {g.isGroup ? getDocumentTitle(g.type) : g.productName}
                                                   
-                                                  {(g.type === 'SALE_CASH' || g.type === 'SALE_CREDIT') && (
+                                                  {(g.type === 'SALE_CASH' || g.type === 'SALE_CREDIT' || g.type === 'SALE') && (
                                                       isFullyPaid ? (
-                                                          <span className="text-[9px] bg-emerald-100 text-emerald-600 px-1.5 rounded border border-emerald-200 font-bold uppercase flex items-center gap-1"><CheckCircle2 size={8}/> {g.groupReturnedValue > 0 ? 'Soldé (Avec Retour)' : 'Payé'}</span>
+                                                          <span className="text-[9px] bg-emerald-100 text-emerald-600 px-1.5 rounded border border-emerald-200 font-bold uppercase flex items-center gap-1"><CheckCircle2 size={8}/> {g.groupReturnedCents > 0 ? 'Soldé (Avec Retour)' : 'Payé'}</span>
                                                       ) : isPartial ? (
                                                           <span className="text-[9px] bg-sky-100 text-sky-700 px-1.5 rounded border border-sky-200 font-bold uppercase flex items-center gap-1"><PieChart size={8}/> Reste {formatMAD(remaining)}</span>
                                                       ) : (
@@ -414,10 +429,10 @@ export const ClientProfile: React.FC<Props> = ({ clientId, onClose }) => {
                                       
                                       <div className="text-right flex items-center gap-4" onClick={e => e.stopPropagation()}>
                                           <div className={`font-black ${g.type === 'RETURN' || g.type === 'PAYMENT' ? 'text-emerald-600' : 'text-slate-800'}`}>
-                                              {g.type === 'RETURN' || g.type === 'PAYMENT' ? '+' : ''}{formatMAD(total)}
+                                              {g.type === 'RETURN' || g.type === 'PAYMENT' ? '+' : ''}{formatMAD(g.groupTotal)}
                                           </div>
                                           
-                                          {(g.type === 'SALE_CASH' || g.type === 'SALE_CREDIT') && remaining > 0.05 ? (
+                                          {(g.type === 'SALE_CASH' || g.type === 'SALE_CREDIT' || g.type === 'SALE') && remaining > 0.05 ? (
                                               <button onClick={() => setSelectedDebtTicket(g)} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm flex items-center gap-1 transition-all hover:scale-105">
                                                   <Banknote size={14}/> {isPartial ? 'SOLDE' : 'PAYER'}
                                               </button>
@@ -485,7 +500,7 @@ export const ClientProfile: React.FC<Props> = ({ clientId, onClose }) => {
                     <InternalPaymentModal 
                         clientId={clientId} 
                         clientName={profile?.name || ''}
-                        maxAmount={selectedDebtTicket === "GLOBAL" ? activeDebt : (selectedDebtTicket.groupTotal - selectedDebtTicket.groupReturnedValue - selectedDebtTicket.groupPaid)} 
+                        maxAmount={selectedDebtTicket === "GLOBAL" ? activeDebt : selectedDebtTicket.groupTotal - selectedDebtTicket.groupReturnedValue - selectedDebtTicket.groupPaid} 
                         targetTicket={selectedDebtTicket === "GLOBAL" ? undefined : selectedDebtTicket}
                         onClose={() => setSelectedDebtTicket(null)} 
                         onSuccess={() => { setSelectedDebtTicket(null); loadProfile(); loadHistory(1, true); }} 
@@ -498,8 +513,18 @@ export const ClientProfile: React.FC<Props> = ({ clientId, onClose }) => {
                             <h2 className="text-xl font-black mb-4">Retourner Produit</h2>
                             <p className="text-sm text-slate-500 mb-6">{returnModal.mov.productName}</p>
                             <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Quantité Max: <span className="text-red-600">{returnModal.mov.quantity - (returnModal.mov.returnedQuantity || 0)}</span></label>
-                            <input type="number" min="1" max={returnModal.mov.quantity - (returnModal.mov.returnedQuantity || 0)} className="w-full p-4 bg-slate-50 border-2 border-slate-100 rounded-xl text-2xl font-black text-center mb-6 outline-none focus:border-red-400" 
-                                   value={returnModal.qty} onChange={e => setReturnModal({...returnModal, qty: Number(e.target.value)})} />
+                            {/* 🛡️ SECURITY FIX: Enforce ceiling via HTML max attribute */}
+                            <input 
+                                type="number" min="1" 
+                                max={returnModal.mov.quantity - (returnModal.mov.returnedQuantity || 0)} 
+                                className="w-full p-4 bg-slate-50 border-2 border-slate-100 rounded-xl text-2xl font-black text-center mb-6 outline-none focus:border-red-400" 
+                                value={returnModal.qty} 
+                                onChange={e => {
+                                    const val = Number(e.target.value);
+                                    const maxAllowed = returnModal.mov.quantity - (returnModal.mov.returnedQuantity || 0);
+                                    setReturnModal({...returnModal, qty: val > maxAllowed ? maxAllowed : val});
+                                }} 
+                            />
                             <div className="flex gap-3">
                                 <button onClick={() => setReturnModal({isOpen: false, mov: null, qty: 1})} className="flex-1 py-3 bg-slate-100 font-bold text-slate-600 rounded-xl">Annuler</button>
                                 <button onClick={handleSubmitReturn} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700">CONFIRMER</button>

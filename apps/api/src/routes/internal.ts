@@ -1,3 +1,4 @@
+// apps/api/src/routes/internal.ts
 import { Router } from 'express';
 import { InternalController } from '../controllers/InternalController';
 import { StatsController } from '../controllers/StatsController';
@@ -28,10 +29,10 @@ router.post('/transactions', InternalController.createTransaction);
 router.post('/transactions/batch', InternalController.createBatchTransaction); 
 router.post('/transactions/:id/void', requireAdmin, InternalController.voidTransaction); 
 
-// 📊 Analytics & Stats
-router.get('/stats', StatsController.getGlobalStats);
-router.get('/analytics', DashboardController.getInternalAnalytics);
-
+// 📊 Analytics & Stats (🚨 CRITICAL SECURITY LEAK CLOSED)
+router.get('/stats', requireAdmin, StatsController.getGlobalStats);
+router.get('/analytics', requireAdmin, DashboardController.getInternalAnalytics);
+router.get('/till', requirePosAccess, DashboardController.getDailyTill);
 // 👥 CLIENTS
 router.get('/clients', InternalClientController.searchClients);
 router.post('/clients', InternalClientController.createClient);
@@ -43,12 +44,17 @@ router.post('/clients/:id/legacy-debt', requireAdmin, InternalClientController.i
 router.put('/clients/:id', requireAdmin, InternalClientController.updateClient); 
 router.delete('/clients/:id', requireAdmin, InternalClientController.deleteClient); 
 
-// 🚛 INTERNAL SUPPLIERS
+// 🚛 INTERNAL SUPPLIERS 
 router.get('/suppliers', InternalPurchaseController.getSuppliers);
 router.post('/suppliers', requireAdmin, InternalPurchaseController.createSupplier);
+router.post('/suppliers/:id/payment', requireAdmin, InternalPurchaseController.registerPayment);
+// 🛡️ SECURITY FIX: Supplier financial history should be Admin only
+router.get('/suppliers/:id/statement', requireAdmin, InternalPurchaseController.getSupplierStatement);
+router.delete('/suppliers/:id', requireAdmin, InternalPurchaseController.deleteSupplier);
 
 // 🛒 INTERNAL PURCHASES
 router.get('/purchases', InternalPurchaseController.getPurchaseHistory);
 router.post('/purchases', InternalPurchaseController.createPurchase);
+router.post('/purchases/:id/void', requireAdmin, InternalPurchaseController.voidPurchase);
 
 export default router;

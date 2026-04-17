@@ -1,7 +1,6 @@
+// apps/api/src/controllers/StatsController.ts
 import { Request, Response } from 'express';
 import { prismaInternal, MovementType } from '@marine/db-internal';
-import { prismaLegal } from '@marine/db-legal';
-import { Prisma } from '@marine/db-legal';
 
 // 🛡️ HYPER-RESILIENT NUMBER PARSER
 const toNumber = (val: any): number => {
@@ -33,6 +32,9 @@ const safeDateString = (dateVal: any) => {
 
 export const StatsController = {
   
+  // =========================================================
+  // 🌍 GLOBAL STATS (NOW STRICTLY SILO B - MASTER REALITY)
+  // =========================================================
   getGlobalStats: async (req: Request, res: Response) => {
     try {
       const { from, to } = req.query;
@@ -40,14 +42,11 @@ export const StatsController = {
       const endDate = to ? new Date(String(to)) : new Date();
       endDate.setHours(23, 59, 59, 999);
 
+      // 🚀 Pure, lightning-fast Silo B data.
       const [
           debtAggB,            
           flowB,            
-          flowA_Payments,            
-          flowA_Invoices,
           productsB,
-          productsA,
-          alertsA,
           alertsB,
           quotesAggB,
           topDebtorsB
@@ -57,28 +56,13 @@ export const StatsController = {
         prismaInternal.stockMovement.findMany({
             where: { 
                 createdAt: { gte: startDate, lte: endDate }, 
-                // ✅ CRITICAL FIX 1: Restored SALE_CREDIT so true sales hit the Global Revenue
                 type: { in: [MovementType.SALE_CASH, MovementType.SALE_CREDIT, MovementType.RETURN, MovementType.PAYMENT] },
-                // ✅ CRITICAL FIX 2: Shield analytics from Legacy Debt imports
                 snapshotProductName: { not: { contains: '[REPRISE DE DETTE]' } }
             },
-            select: { createdAt: true, type: true, paymentMethod: true, amount: true, quantity: true, snapshotPurchaseCost: true }
+            select: { createdAt: true, type: true, paymentMethod: true, amount: true, quantity: true, snapshotPurchaseCost: true, snapshotVatRate: true, totalHT: true, totalTVA: true }
         }),
         
-        prismaLegal.payment.findMany({
-            where: { paidAt: { gte: startDate, lte: endDate } },
-            select: { paidAt: true, amount: true, method: true, invoice: { select: { type: true } } }
-        }),
-
-        prismaLegal.invoice.findMany({
-            where: { issuedAt: { gte: startDate, lte: endDate }, status: { not: 'ANNULEE' } },
-            select: { issuedAt: true, type: true, totalHT: true, amountPaid: true, totalTTC: true, status: true, items: { select: { quantity: true, unitPurchaseCostSnapshot: true } } }
-        }),
-
-        prismaInternal.productB.findMany({ select: { quantity: true, purchaseCost: true, sellingPrice: true } }),
-        prismaLegal.productA.findMany({ select: { quantity: true, purchaseCost: true, priceHT: true } }),
-        
-        prismaLegal.productA.count({ where: { quantity: { lte: 5 } } }),
+        prismaInternal.productB.findMany({ select: { quantity: true, purchaseCost: true, priceTTC: true } }),
         prismaInternal.productB.count({ where: { quantity: { lte: 5 } } }),
 
         prismaInternal.stockMovement.aggregate({
@@ -96,108 +80,80 @@ export const StatsController = {
 
       const chartMap = new Map<string, any>();
       const ensureDate = (d: string) => {
-          if (!chartMap.has(d)) chartMap.set(d, { date: d, legal: 0, internalSales: 0, internalRefunds: 0 });
+          if (!chartMap.has(d)) chartMap.set(d, { date: d, internalSales: 0, internalRefunds: 0 });
           return chartMap.get(d);
       };
 
-      // --- PROCESS SILO A ---
-      let caLegal = 0; let dueA = 0; let salesCountA = 0; let costA = 0;
-      flowA_Invoices.forEach(inv => {
-          const d = safeDateString(inv.issuedAt);
-          const daily = ensureDate(d);
-          const rev = toNumber(inv.totalHT);
-          
-          if (inv.type === 'FACTURE') {
-              caLegal += rev;
-              daily.legal += rev;
-              salesCountA += 1;
-              if (inv.status === 'EN_ATTENTE' || inv.status === 'PARTIEL') dueA += Math.max(0, toNumber(inv.totalTTC) - toNumber(inv.amountPaid));
-          } else if (inv.type === 'AVOIR') {
-              caLegal -= rev;
-              daily.legal -= rev;
-          }
-          if (inv.items) {
-              inv.items.forEach(item => { costA += (toNumber(item.quantity) * toNumber(item.unitPurchaseCostSnapshot)); });
-          }
-      });
-      const marginLegal = caLegal - costA;
-
-      // --- PROCESS SILO B ---
-      let caCash = 0; let costB = 0; let salesCountB = 0;
-      let realCashB = 0; let checksB = 0;
+      // 🧮 STRICT CENT-MATH AGGREGATION ENGINE
+      let caCashTTCCents = 0; let caCashHTCents = 0; let caCashTVACents = 0;
+      let costBCents = 0; let salesCountB = 0;
+      let realCashBCents = 0; let checksBCents = 0;
 
       flowB.forEach(m => {
           const d = safeDateString(m.createdAt);
           const daily = ensureDate(d);
-          const amt = Math.abs(toNumber(m.amount));
-          const cst = toNumber(m.quantity) * toNumber(m.snapshotPurchaseCost);
+          
+          // 🛡️ THE FIX: Bulletproof Math Extractor (Forces HT calculation if missing)
+          const qty = Math.abs(toNumber(m.quantity));
+          const rawTTC = Math.abs(toNumber(m.amount));
+          let rawHT = Math.abs(toNumber(m.totalHT));
+          
+          if (rawHT === 0 && rawTTC > 0) {
+              const vatRate = m.snapshotVatRate !== undefined && m.snapshotVatRate !== null ? toNumber(m.snapshotVatRate) : 0.20;
+              rawHT = rawTTC / (1 + vatRate);
+          }
+
+          const amtTTCCents = Math.round(rawTTC * 100);
+          const amtHTCents = Math.round(rawHT * 100);
+          const amtTVACents = Math.round(Math.abs(toNumber(m.totalTVA)) * 100);
+          const cstCents = Math.round((qty * toNumber(m.snapshotPurchaseCost)) * 100);
           
           const method = String(m.paymentMethod || 'CASH').toUpperCase();
           const isCash = method === 'CASH' || method === 'ESPECES' || method === 'VIREMENT' || method === 'TRANSFER';
           const isCheck = method === 'CHECK' || method === 'CHEQUE';
 
-          if (m.type === 'SALE_CASH' || (m.type as any) === 'SALE_CREDIT') {
-              caCash += amt;
-              costB += cst;
+          if (m.type === 'SALE_CASH' || m.type === 'SALE_CREDIT') {
+              caCashTTCCents += amtTTCCents;
+              caCashHTCents += amtHTCents;
+              caCashTVACents += amtTVACents;
+              costBCents += cstCents;
               salesCountB += 1;
-              daily.internalSales += amt;
+              daily.internalSales += (amtTTCCents / 100); // UI Chart maps to MAD
+              
               if (m.type === 'SALE_CASH') {
-                  if (isCash) realCashB += amt;
-                  if (isCheck) checksB += amt;
+                  if (isCash) realCashBCents += amtTTCCents;
+                  if (isCheck) checksBCents += amtTTCCents;
               }
           } else if (m.type === 'RETURN') {
-              caCash -= amt;
-              costB -= cst;
-              daily.internalRefunds += amt;
-              // Deduct from cash drawer only if it was a cash refund
+              caCashTTCCents -= amtTTCCents;
+              caCashHTCents -= amtHTCents;
+              caCashTVACents -= amtTVACents;
+              costBCents -= cstCents;
+              daily.internalRefunds += (amtTTCCents / 100); // UI Chart maps to MAD
+              
               if (m.paymentMethod === 'CASH' || m.paymentMethod === 'ESPECES') { 
-                  realCashB -= amt; 
+                  realCashBCents -= amtTTCCents; 
               } else if (isCheck) { 
-                  checksB -= amt; 
+                  checksBCents -= amtTTCCents; 
               }
           } else if (m.type === 'PAYMENT') {
               if (method === 'COMPENSATION' || method === 'AVOIR') return;
-              if (isCash) realCashB += amt;
-              if (isCheck) checksB += amt;
+              if (isCash) realCashBCents += amtTTCCents;
+              if (isCheck) checksBCents += amtTTCCents;
           }
       });
 
-      const marginCash = caCash - costB;
+      // 🛡️ ACCOUNTING FIX: Gross Margin = Revenue HT - Cost (NOT TTC!)
+      const marginCashCents = caCashHTCents - costBCents;
+      
       const debtB = toNumber(debtAggB._sum?.balance);
 
-      // --- PROCESS SILO A TREASURY ---
-      let realCashA = 0; let checksA = 0;
-      flowA_Payments.forEach(p => { 
-          const amt = toNumber(p.amount);
-          const method = String(p.method).toUpperCase();
-
-          if (method === 'AVOIR' || method === 'COMPENSATION') return;
-
-          const isCash = method === 'CASH' || method === 'ESPECES' || method === 'VIREMENT' || method === 'TRANSFER';
-          const isCheck = method === 'CHECK' || method === 'CHEQUE';
-
-          if (p.invoice?.type === 'AVOIR') {
-              if (isCash) realCashA -= amt;
-              if (isCheck) checksA -= amt;
-          } else {
-              if (isCash) realCashA += amt;
-              if (isCheck) checksA += amt;
-          }
-      });
-
-      let stockValueCost = 0; let stockValuePotential = 0;
+      let stockValueCostCents = 0; let stockValuePotentialCents = 0;
       productsB.forEach(p => {
           const q = toNumber(p.quantity);
           if (q > 0) {
-              stockValueCost += (q * toNumber(p.purchaseCost));
-              stockValuePotential += (q * toNumber(p.sellingPrice));
-          }
-      });
-      productsA.forEach(p => {
-          const q = toNumber(p.quantity);
-          if (q > 0) {
-              stockValueCost += (q * toNumber(p.purchaseCost));
-              stockValuePotential += (q * toNumber(p.priceHT));
+              stockValueCostCents += Math.round(q * toNumber(p.purchaseCost) * 100);
+              stockValuePotentialCents += Math.round(q * toNumber(p.priceTTC) * 100); 
           }
       });
 
@@ -205,18 +161,23 @@ export const StatsController = {
 
       res.json({
           metrics: {
-              totalCA: caLegal + caCash,
-              salesCount: salesCountA + salesCountB,
-              totalProfits: marginLegal + marginCash,
-              alertsCount: alertsA + alertsB,
+              totalCA: caCashTTCCents / 100, // Master Reality TTC
+              salesCount: salesCountB,
+              totalProfits: marginCashCents / 100, // Safe HT Margin
+              alertsCount: alertsB,
               pipeline: toNumber(quotesAggB._sum?.amount),
-              stockValueCost,
-              stockValuePotential,
-              split: { legal: caLegal, cash: caCash },
+              stockValueCost: stockValueCostCents / 100,
+              stockValuePotential: stockValuePotentialCents / 100,
+              split: { legal: 0, cash: caCashTTCCents / 100 }, 
               treasury: { 
-                  realCash: realCashA + realCashB, 
-                  checks: checksA + checksB, 
-                  totalDue: dueA + debtB 
+                  realCash: realCashBCents / 100, 
+                  checks: checksBCents / 100, 
+                  totalDue: debtB 
+              },
+              revenue: {
+                  totalTTC: caCashTTCCents / 100,
+                  totalHT: caCashHTCents / 100, 
+                  totalTVA: caCashTVACents / 100 
               }
           },
           charts: chartData,
