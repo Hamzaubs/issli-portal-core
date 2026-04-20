@@ -172,7 +172,7 @@ export const GlobalDashboard = () => {
                         <span>Chèques en main:</span> <span className="text-white">{formatMAD(metrics.treasury?.checks || 0)}</span>
                     </div>
                     <div className="flex justify-between text-slate-400">
-                        <span>Créances (Dette Clients):</span> 
+                        <span>Créances (Créances Clients):</span> 
                         <span className="text-orange-400">{formatMAD(metrics.treasury?.totalDue || 0)}</span>
                     </div>
                 </div>

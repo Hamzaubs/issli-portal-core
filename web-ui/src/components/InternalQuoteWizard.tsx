@@ -252,7 +252,7 @@ export const InternalQuoteWizard: React.FC<Props> = ({ onCancel, onSuccess }) =>
                                     <select className="w-full p-2 mb-4 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 outline-none"
                                         value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}>
                                         <option value="CASH">Espèces (Caisse)</option>
-                                        <option value="CREDIT">Crédit (Dette Client)</option>
+                                        <option value="CREDIT">Crédit (Créance Client)</option>
                                     </select>
                                 )}
 

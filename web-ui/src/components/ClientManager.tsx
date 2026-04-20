@@ -126,7 +126,7 @@ const InternalManager: React.FC = () => {
                 <div className="bg-red-900 text-white p-6 rounded-2xl shadow-xl mb-8 flex justify-between items-center relative overflow-hidden">
                     <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none"></div>
                     <div>
-                        <p className="text-red-200 font-bold uppercase text-xs tracking-widest mb-1">Encours Global (Dette Client)</p>
+                        <p className="text-red-200 font-bold uppercase text-xs tracking-widest mb-1">Encours Global (Créance Client)</p>
                         <h2 className="text-4xl font-black tracking-tighter">{formatMAD(globalDebt)}</h2>
                     </div>
                     <div className="text-right z-10">

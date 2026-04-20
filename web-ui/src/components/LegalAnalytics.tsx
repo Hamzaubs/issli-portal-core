@@ -179,7 +179,7 @@ export const LegalAnalytics: React.FC<AnalyticsProps> = ({ onBack }) => {
                     {/* Créances Clients */}
                     <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm print-shadow-none print-break-inside-avoid">
                         <div className="flex justify-between items-start mb-2">
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Créances (Dette TTC)</p>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Créances (Créance TTC)</p>
                             <div className={`p-1.5 rounded ${kpi.totalDebt > 0 ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'}`}>
                                 {kpi.totalDebt > 0 ? <AlertTriangle size={16}/> : <ShieldCheck size={16}/>}
                             </div>

@@ -166,7 +166,7 @@ export const InternalAnalytics: React.FC<AnalyticsProps> = ({ onBack }) => {
 
                     <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm print-shadow-none print-break-inside-avoid">
                         <div className="flex justify-between items-start mb-2">
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Dette Clients Actives</p>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Créances Clients Actives</p>
                             <div className="p-1.5 bg-orange-50 text-orange-600 rounded"><AlertTriangle size={16}/></div>
                         </div>
                         <h2 className="text-2xl font-black text-orange-600 mt-1">{formatCompact(metrics.treasury?.totalDue || 0)} <span className="text-xs text-slate-400 font-medium">MAD</span></h2>
