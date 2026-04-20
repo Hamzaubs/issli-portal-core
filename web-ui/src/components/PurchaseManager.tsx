@@ -11,6 +11,9 @@ interface PurchaseManagerProps {
 }
 
 export const PurchaseManager = ({ mode }: PurchaseManagerProps) => {
+  const isLegal = mode === 'LEGAL';
+  const themeColor = isLegal ? 'indigo' : 'emerald';
+
   const [purchases, setPurchases] = useState<any[]>([]);
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]); 
@@ -19,7 +22,8 @@ export const PurchaseManager = ({ mode }: PurchaseManagerProps) => {
   const [printingPurchase, setPrintingPurchase] = useState<any | null>(null);
 
   const [supplierId, setSupplierId] = useState('');
-  const [type, setType] = useState('FACTURE_ACHAT');
+  // 🛡️ NATIVE FIX: Initializes the correct Native DB state based on the silo
+  const [type, setType] = useState(isLegal ? 'FACTURE_ACHAT' : 'BON_RECEPTION');
   const [reference, setReference] = useState('');
   const [note, setNote] = useState('');
   
@@ -37,7 +41,7 @@ export const PurchaseManager = ({ mode }: PurchaseManagerProps) => {
     setLoading(true);
     try {
       const [purchasesRes, suppliersRes, productsRes] = await Promise.all([
-        PurchaseService.getAll(mode), SupplierService.getAll(mode), client.get(mode === 'LEGAL' ? '/legal/products' : '/internal/products') 
+        PurchaseService.getAll(mode), SupplierService.getAll(mode), client.get(isLegal ? '/legal/products' : '/internal/products') 
       ]);
       setPurchases(purchasesRes);
       setSuppliers(suppliersRes.data || suppliersRes); 
@@ -97,7 +101,7 @@ export const PurchaseManager = ({ mode }: PurchaseManagerProps) => {
       e.preventDefault();
       setCreatingProduct(true);
       try {
-          const endpoint = mode === 'LEGAL' ? '/legal/products' : '/internal/products';
+          const endpoint = isLegal ? '/legal/products' : '/internal/products';
           const res = await client.post(endpoint, { ...newProduct, purchaseCost: 0, quantity: 0 });
           const createdProduct = res.data;
 
@@ -118,7 +122,6 @@ export const PurchaseManager = ({ mode }: PurchaseManagerProps) => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!supplierId) return alert("Veuillez sélectionner un fournisseur.");
-    
     if (items.some(i => !i.productName || Number(i.quantity) <= 0)) {
         return alert("Veuillez remplir correctement les articles (La désignation et la quantité sont obligatoires).");
     }
@@ -128,7 +131,7 @@ export const PurchaseManager = ({ mode }: PurchaseManagerProps) => {
     const ttcCents = Math.round(purchaseTotals.TTC * 100);
 
     if (acompteCents > ttcCents) {
-        return alert(`Impossible ! Le montant payé (${acompte.toLocaleString('fr-MA', { minimumFractionDigits: 2 })} DH) ne peut pas dépasser le total TTC du document (${purchaseTotals.TTC.toLocaleString('fr-MA', { minimumFractionDigits: 2 })} DH).`);
+        return alert(`Impossible ! Le montant payé ne peut pas dépasser le total TTC du document.`);
     }
 
     try {
@@ -136,13 +139,14 @@ export const PurchaseManager = ({ mode }: PurchaseManagerProps) => {
       
       setShowForm(false);
       setSupplierId(''); setReference(''); setNote(''); setInitialPayment(''); setPaymentMethod('CASH'); setPaymentRef('');
+      setType(isLegal ? 'FACTURE_ACHAT' : 'BON_RECEPTION'); // Reset to Native Default
       setItems([{ id: Date.now().toString(), productId: '', productName: '', quantity: 1, measureUnit: 'UNIT', unitPriceHT: 0, vatRate: 0.20 }]);
       fetchData();
       alert("✅ Document enregistré avec succès !");
     } catch (error: any) { alert(error.response?.data?.error || "Erreur lors de l'enregistrement."); }
   };
 
-  const formatMAD = (amount: number) => new Intl.NumberFormat('fr-MA', { style: 'currency', currency: 'MAD' }).format(Number(amount));
+  const formatMAD = (amount: number) => new Intl.NumberFormat('fr-MA', { style: 'currency', currency: 'MAD' }).format(Number(amount) || 0);
   
   const handleVoidPurchase = async (id: string) => {
       if (!window.confirm("⚠️ ATTENTION : Voulez-vous vraiment annuler ce document ? Les stocks et la trésorerie seront automatiquement inversés.")) return;
@@ -155,8 +159,6 @@ export const PurchaseManager = ({ mode }: PurchaseManagerProps) => {
       }
   };
 
-  const isLegal = mode === 'LEGAL';
-  const themeColor = isLegal ? 'indigo' : 'emerald';
   const getUnitLabel = (unit: string) => { switch(unit) { case 'KG': return 'kg'; case 'M': return 'm'; case 'L': return 'L'; default: return 'u'; } };
 
   return (
@@ -187,9 +189,13 @@ export const PurchaseManager = ({ mode }: PurchaseManagerProps) => {
             <div>
               <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Type Document</label>
               <select className={`w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none focus:border-${themeColor}-500`} value={type} onChange={e => setType(e.target.value)}>
-                <option value="FACTURE_ACHAT">Facture d'Achat</option>
+                {/* 🛡️ NATIVE FIX: Physically displays and sets the Native DB Enum based on Silo */}
+                {isLegal ? (
+                    <option value="FACTURE_ACHAT">Facture d'Achat</option>
+                ) : (
+                    <option value="BON_RECEPTION">Bon de Réception</option>
+                )}
                 <option value="BON_COMMANDE">Bon de Commande</option>
-                <option value="BON_RECEPTION">Bon de Réception</option>
               </select>
             </div>
             <div>
@@ -331,37 +337,45 @@ export const PurchaseManager = ({ mode }: PurchaseManagerProps) => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {purchases.map(p => (
-                  <tr key={p.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="p-5">
-                      <div className="font-black text-slate-800">{p.reference}</div>
-                      <div className="text-xs font-bold text-slate-400 mt-1 uppercase">{new Date(p.issuedAt).toLocaleDateString('fr-MA')}</div>
-                    </td>
-                    <td className="p-5 font-bold text-slate-700 text-sm">
-                      {p.supplier?.name || p.supplierNameSnapshot}
-                    </td>
-                    <td className="p-5">
-                      <div className="flex flex-col items-start gap-1">
-                          <span className={`px-2 py-1 text-[9px] font-black uppercase tracking-widest rounded-md border ${p.type === 'BON_COMMANDE' ? 'bg-amber-50 border-amber-200 text-amber-600' : 'bg-blue-50 border-blue-200 text-blue-600'}`}>{p.type.replace('_', ' ')}</span>
-                          <span className={`px-2 py-1 text-[9px] font-black uppercase tracking-widest rounded-md border ${p.status === 'ANNULEE' ? 'bg-slate-100 border-slate-300 text-slate-500' : p.status === 'PAYEE' ? 'bg-emerald-50 border-emerald-200 text-emerald-600' : p.status === 'PARTIEL' ? 'bg-orange-50 border-orange-200 text-orange-600' : 'bg-red-50 border-red-200 text-red-600'}`}>{p.status}</span>
-                      </div>
-                    </td>
-                    <td className="p-5 text-right">
-                        <div className={`font-black text-lg ${p.status === 'ANNULEE' ? 'text-slate-400 line-through' : 'text-slate-900'}`}>{formatMAD(p.totalTTC)}</div>
-                        <div className="text-xs font-bold text-slate-400 mt-1">Payé: {formatMAD(p.amountPaid)}</div>
-                    </td>
-                    <td className="p-5 text-right flex justify-end gap-2">
-                        <button onClick={() => setPrintingPurchase(p)} className={`p-2.5 text-slate-400 hover:text-${themeColor}-600 hover:bg-${themeColor}-50 rounded-xl transition-all shadow-sm border border-transparent hover:border-${themeColor}-200`} title="Imprimer document">
-                            <Printer size={18} />
-                        </button>
-                        {p.status !== 'ANNULEE' && p.type !== 'PAIEMENT' && (
-                            <button onClick={() => handleVoidPurchase(p.id)} className="p-2.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all shadow-sm border border-transparent hover:border-red-200" title="Annuler ce document">
-                                <XCircle size={18} />
-                            </button>
-                        )}
-                    </td>
-                  </tr>
-                ))}
+                {purchases.map(p => {
+                  const rawType = p.type || 'DOCUMENT';
+                  // Keep a tiny visual rename for OLD FACTURE_ACHAT documents in Silo B, but native types print perfectly
+                  const displayType = rawType === 'FACTURE_ACHAT' && !isLegal ? 'BON DE RÉCEPTION' : rawType.replace('_', ' ');
+
+                  return (
+                    <tr key={p.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="p-5">
+                        <div className="font-black text-slate-800">{p.reference}</div>
+                        <div className="text-xs font-bold text-slate-400 mt-1 uppercase">{p.issuedAt ? new Date(p.issuedAt).toLocaleDateString('fr-MA') : '-'}</div>
+                      </td>
+                      <td className="p-5 font-bold text-slate-700 text-sm">
+                        {p.supplier?.name || p.supplierNameSnapshot || '-'}
+                      </td>
+                      <td className="p-5">
+                        <div className="flex flex-col items-start gap-1">
+                            <span className={`px-2 py-1 text-[9px] font-black uppercase tracking-widest rounded-md border ${rawType === 'BON_COMMANDE' ? 'bg-amber-50 border-amber-200 text-amber-600' : 'bg-blue-50 border-blue-200 text-blue-600'}`}>
+                                {displayType}
+                            </span>
+                            <span className={`px-2 py-1 text-[9px] font-black uppercase tracking-widest rounded-md border ${p.status === 'ANNULEE' ? 'bg-slate-100 border-slate-300 text-slate-500' : p.status === 'PAYEE' ? 'bg-emerald-50 border-emerald-200 text-emerald-600' : p.status === 'PARTIEL' ? 'bg-orange-50 border-orange-200 text-orange-600' : 'bg-red-50 border-red-200 text-red-600'}`}>{p.status || 'EN_ATTENTE'}</span>
+                        </div>
+                      </td>
+                      <td className="p-5 text-right">
+                          <div className={`font-black text-lg ${p.status === 'ANNULEE' ? 'text-slate-400 line-through' : 'text-slate-900'}`}>{formatMAD(p.totalTTC)}</div>
+                          <div className="text-xs font-bold text-slate-400 mt-1">Payé: {formatMAD(p.amountPaid)}</div>
+                      </td>
+                      <td className="p-5 text-right flex justify-end gap-2">
+                          <button onClick={() => setPrintingPurchase(p)} className={`p-2.5 text-slate-400 hover:text-${themeColor}-600 hover:bg-${themeColor}-50 rounded-xl transition-all shadow-sm border border-transparent hover:border-${themeColor}-200`} title="Imprimer document">
+                              <Printer size={18} />
+                          </button>
+                          {p.status !== 'ANNULEE' && rawType !== 'PAIEMENT' && (
+                              <button onClick={() => handleVoidPurchase(p.id)} className="p-2.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all shadow-sm border border-transparent hover:border-red-200" title="Annuler ce document">
+                                  <XCircle size={18} />
+                              </button>
+                          )}
+                      </td>
+                    </tr>
+                  )
+                })}
                 {purchases.length === 0 && <tr><td colSpan={5} className="p-10 text-center text-slate-400 font-bold uppercase tracking-widest">Aucun achat enregistré.</td></tr>}
               </tbody>
             </table>
@@ -369,7 +383,7 @@ export const PurchaseManager = ({ mode }: PurchaseManagerProps) => {
         )}
       </div>
 
-      {printingPurchase && <PurchasePrint purchase={printingPurchase} onClose={() => setPrintingPurchase(null)} />}
+      {printingPurchase && <PurchasePrint purchase={printingPurchase} isLegal={isLegal} onClose={() => setPrintingPurchase(null)} />}
     </div>
   );
 };

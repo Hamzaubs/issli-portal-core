@@ -3,7 +3,6 @@ import React, { useRef, useMemo } from 'react';
 import { useReactToPrint } from 'react-to-print';
 import { Printer, X } from 'lucide-react';
 
-// 🛡️ CONVERTISSEUR CHIFFRES EN LETTRES (MAD)
 const numberToFrenchWords = (num: number): string => {
     const units = ["", "Un", "Deux", "Trois", "Quatre", "Cinq", "Six", "Sept", "Huit", "Neuf", "Dix", "Onze", "Douze", "Treize", "Quatorze", "Quinze", "Seize", "Dix-Sept", "Dix-Huit", "Dix-Neuf"];
     const tens = ["", "Dix", "Vingt", "Trente", "Quarante", "Cinquante", "Soixante", "Soixante-Dix", "Quatre-Vingt", "Quatre-Vingt-Dix"];
@@ -55,23 +54,24 @@ const numberToFrenchWords = (num: number): string => {
     return finalStr.toUpperCase();
 };
 
-export const PurchasePrint = ({ purchase, onClose }: { purchase: any; onClose: () => void }) => {
+export const PurchasePrint = ({ purchase, isLegal = false, onClose }: { purchase: any; isLegal?: boolean; onClose: () => void }) => {
   const componentRef = useRef(null);
-  const handlePrint = useReactToPrint({ contentRef: componentRef, documentTitle: `Document_${purchase.reference}` });
+  const handlePrint = useReactToPrint({ contentRef: componentRef, documentTitle: `Document_${purchase?.reference || 'Inconnu'}` });
   
-  const formatMAD = (amount: number) => new Intl.NumberFormat('fr-MA', { style: 'currency', currency: 'MAD' }).format(amount || 0);
+  const formatMAD = (amount: number) => new Intl.NumberFormat('fr-MA', { style: 'currency', currency: 'MAD' }).format(Number(amount) || 0);
   const formatDate = (dateString: string) => dateString ? new Date(dateString).toLocaleDateString('fr-MA', { day: '2-digit', month: 'long', year: 'numeric' }) : '-';
   
-  const isBonCommande = purchase.type === 'BON_COMMANDE';
-  const title = purchase.type.replace('_', ' '); // E.g., FACTURE ACHAT or BON COMMANDE
+  // 🛡️ NATIVE FIX: Reads pure DB Value safely
+  const rawType = purchase?.type || 'DOCUMENT';
+  const isBonCommande = rawType === 'BON_COMMANDE';
+  const title = rawType === 'FACTURE_ACHAT' && !isLegal ? 'BON DE RÉCEPTION' : rawType.replace('_', ' ');
 
-  // SAFELY ROUNDED VAT BREAKDOWN
   const vatBreakdown = useMemo(() => {
     const breakdown: Record<number, { base: number; amount: number }> = { 0.20: { base: 0, amount: 0 }, 0.10: { base: 0, amount: 0 }, 0.14: { base: 0, amount: 0 } }; 
-    (purchase.items || []).forEach((item: any) => {
+    (purchase?.items || []).forEach((item: any) => {
         const rate = Number(item.vatRateSnapshot || 0.20);
         const price = Number(item.unitPriceHT || 0);
-        const qty = Number(item.quantity);
+        const qty = Number(item.quantity || 0);
         
         const lineBase = Math.round((price * qty) * 100) / 100; 
         const lineVat = Math.round((lineBase * rate) * 100) / 100;
@@ -81,13 +81,11 @@ export const PurchasePrint = ({ purchase, onClose }: { purchase: any; onClose: (
         else if (Math.abs(rate - 0.14) < 0.01) { breakdown[0.14].base += lineBase; breakdown[0.14].amount += lineVat; }
     });
     return breakdown;
-  }, [purchase.items]);
+  }, [purchase]);
 
   return (
     <div className="fixed inset-0 bg-slate-900/80 z-[100] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
       <div className="bg-slate-100 w-full max-w-5xl h-[95vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col border border-slate-700">
-        
-        {/* TOOLBAR */}
         <div className="bg-white border-b border-gray-200 p-4 flex justify-between items-center shadow-sm z-50">
           <div className="flex items-center gap-2 text-slate-700 font-bold">
               <Printer size={20} className="text-indigo-800" /> 
@@ -99,44 +97,39 @@ export const PurchasePrint = ({ purchase, onClose }: { purchase: any; onClose: (
           </div>
         </div>
 
-        {/* PREVIEW */}
         <div className="flex-1 overflow-auto bg-slate-200 p-8 flex justify-center">
-          {/* pt-[45mm] allows space for the company's pre-printed letterhead header */}
           <div ref={componentRef} className="bg-white w-[210mm] min-h-[297mm] px-[15mm] pt-[45mm] pb-[15mm] text-slate-900 relative text-sm shadow-xl flex flex-col">
             <style>{`@media print { @page { size: A4; margin: 0; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }`}</style>
 
-            {/* LETTERHEAD READY HEADER (No Business Info) */}
             <div className="flex justify-end items-start mb-8 relative z-10">
                 <div className="text-right">
                   <h2 className={`text-4xl font-light uppercase tracking-wide mb-1 ${isBonCommande ? 'text-indigo-600' : 'text-slate-800'}`}>{title}</h2>
-                  <p className="text-slate-900 font-bold text-lg">Réf: {purchase.reference}</p>
-                  <p className="text-slate-500 text-xs mt-1">Date : {formatDate(purchase.issuedAt)}</p>
+                  <p className="text-slate-900 font-bold text-lg">Réf: {purchase?.reference || '-'}</p>
+                  <p className="text-slate-500 text-xs mt-1">Date : {formatDate(purchase?.issuedAt)}</p>
                 </div>
             </div>
 
-            {/* SUPPLIER BOX (Replaces Client Box) */}
             <div className="flex justify-start mb-10 relative z-10">
                 <div className="w-[55%] bg-slate-50 rounded-xl border border-slate-200 p-5 shadow-sm">
                     <p className="text-[10px] font-bold text-indigo-700 uppercase tracking-widest mb-2 print:text-indigo-700">Fournisseur</p>
-                    <h3 className="text-lg font-bold text-slate-900 mb-1">{purchase.supplierNameSnapshot || purchase.supplier?.name}</h3>
+                    <h3 className="text-lg font-bold text-slate-900 mb-1">{purchase?.supplierNameSnapshot || purchase?.supplier?.name || '-'}</h3>
                     <div className="text-[11px] text-slate-600 space-y-1">
-                        <p>ICE: <span className="font-mono font-bold text-slate-800">{purchase.supplierIceSnapshot || purchase.supplier?.ice || '-'}</span></p>
+                        <p>ICE: <span className="font-mono font-bold text-slate-800">{purchase?.supplierIceSnapshot || purchase?.supplier?.ice || '-'}</span></p>
                     </div>
                 </div>
             </div>
 
-            {/* TABLE */}
             <table className="w-full mb-8 relative z-10">
               <thead className="bg-slate-100 text-slate-900 text-[10px] font-bold uppercase border-y border-slate-200 print:bg-slate-100">
                 <tr><th className="py-3 px-3 text-left">Désignation</th><th className="py-3 px-3 text-center">Qté</th><th className="py-3 px-3 text-right">P.U. HT</th><th className="py-3 px-3 text-right">Total HT</th></tr>
               </thead>
               <tbody className="text-xs">
-                {(purchase.items || []).map((item: any) => {
+                {(purchase?.items || []).map((item: any) => {
                     const price = Number(item.unitPriceHT || 0);
-                    const qty = Number(item.quantity);
+                    const qty = Number(item.quantity || 0);
                     return (
                         <tr key={item.id} className="border-b border-slate-50">
-                            <td className="py-3 px-3 font-bold text-slate-800">{item.productName}</td>
+                            <td className="py-3 px-3 font-bold text-slate-800">{item.productName || '-'}</td>
                             <td className="py-3 px-3 text-center font-bold">{qty}</td>
                             <td className="py-3 px-3 text-right font-mono text-slate-600">{formatMAD(Math.abs(price))}</td>
                             <td className="py-3 px-3 text-right font-mono font-bold text-slate-900">{formatMAD(Math.abs(price * qty))}</td>
@@ -146,9 +139,7 @@ export const PurchasePrint = ({ purchase, onClose }: { purchase: any; onClose: (
               </tbody>
             </table>
 
-            {/* FOOTER AREA */}
             <div className="flex justify-between items-start mt-auto relative z-10">
-              {/* LEFT: VAT */}
               <div className="w-[50%] text-[10px]">
                     <p className="font-bold text-slate-800 uppercase text-[9px] mb-2">Récapitulatif TVA</p>
                     <table className="w-full text-slate-600 mb-6 border border-slate-200 rounded overflow-hidden">
@@ -161,30 +152,25 @@ export const PurchasePrint = ({ purchase, onClose }: { purchase: any; onClose: (
                     </table>
               </div>
 
-              {/* RIGHT: TOTALS */}
               <div className="w-[40%] flex flex-col items-end">
                   <div className="w-full space-y-2 mb-6 text-sm">
-                    <div className="flex justify-between text-slate-500 border-b border-slate-100 pb-1"><span>Total HT</span><span className="font-bold text-slate-800">{formatMAD(Math.abs(purchase.totalHT))}</span></div>
-                    <div className="flex justify-between text-slate-500 border-b border-slate-100 pb-1"><span>Total TVA</span><span className="font-bold text-slate-800">{formatMAD(Math.abs(purchase.totalTTC - purchase.totalHT))}</span></div>
-                    
+                    <div className="flex justify-between text-slate-500 border-b border-slate-100 pb-1"><span>Total HT</span><span className="font-bold text-slate-800">{formatMAD(Math.abs(Number(purchase?.totalHT) || 0))}</span></div>
+                    <div className="flex justify-between text-slate-500 border-b border-slate-100 pb-1"><span>Total TVA</span><span className="font-bold text-slate-800">{formatMAD(Math.abs(Number(purchase?.totalTTC || 0) - Number(purchase?.totalHT || 0)))}</span></div>
                     <div className="flex justify-between items-center p-2 rounded-lg mt-2 border border-slate-300 bg-slate-50 print:bg-slate-50">
                         <span className="font-bold uppercase text-xs text-slate-800">Total TTC</span>
-                        <span className="font-black text-xl text-slate-900">{formatMAD(Math.abs(purchase.totalTTC))}</span>
+                        <span className="font-black text-xl text-slate-900">{formatMAD(Math.abs(Number(purchase?.totalTTC) || 0))}</span>
                     </div>
                   </div>
               </div>
             </div>
 
-            {/* AMOUNT IN WORDS */}
             <div className="mt-4 mb-2 p-3 bg-slate-50 border border-slate-200 rounded text-xs font-bold text-slate-700 text-center">
                 Arrêté {isBonCommande ? 'le présent bon de commande' : 'le présent document'} à la somme de :<br/>
-                <span className="text-sm font-black text-slate-900 mt-1 block uppercase">{numberToFrenchWords(Math.abs(purchase.totalTTC))}</span>
+                <span className="text-sm font-black text-slate-900 mt-1 block uppercase">{numberToFrenchWords(Math.abs(Number(purchase?.totalTTC) || 0))}</span>
             </div>
 
-            {/* DOCUMENT SPECIFIC NOTES & SIGNATURE SPACE */}
             <div className="mt-2">
-                {purchase.note && <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded text-xs text-slate-600 italic"><strong>Note:</strong> {purchase.note}</div>}
-                
+                {purchase?.note && <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded text-xs text-slate-600 italic"><strong>Note:</strong> {purchase.note}</div>}
                 {isBonCommande ? (
                     <div className="flex justify-between mt-6 pt-6 border-t border-slate-200">
                         <div className="w-64 h-24 border border-slate-300 rounded-lg p-3 text-[10px] text-slate-400 font-bold uppercase tracking-widest bg-slate-50/50">
@@ -193,8 +179,6 @@ export const PurchasePrint = ({ purchase, onClose }: { purchase: any; onClose: (
                     </div>
                 ) : null}
             </div>
-
-            {/* INTENTIONALLY BLANK FOOTER SPACE FOR PRE-PRINTED PAPER */}
           </div>
         </div>
       </div>

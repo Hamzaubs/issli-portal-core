@@ -79,32 +79,86 @@ export const InternalPurchaseController = {
       }
   },
 
+  addLegacyDebt: async (req: Request, res: Response) => {
+      try {
+          const { id } = req.params; 
+          const { amount, note, reference } = req.body;
+
+          const debtAmtCents = Math.round(Number(amount) * 100);
+          if (debtAmtCents <= 0) return res.status(400).json({ error: "Le montant de la dette doit être supérieur à 0." });
+
+          await prismaInternal.$transaction(async (tx) => {
+              const supplier = await tx.supplierB.findUnique({ where: { id } });
+              if (!supplier) throw new Error("Fournisseur introuvable");
+
+              const finalReference = reference ? String(reference).trim() : `SD-${Date.now().toString().slice(-8)}`;
+              const existingRef = await tx.purchaseB.findUnique({ where: { reference: finalReference } });
+              if (existingRef) throw new Error(`La référence '${finalReference}' existe déjà.`);
+
+              const safeDebtAmount = new Prisma.Decimal((debtAmtCents / 100).toFixed(2));
+
+              // 1. Increment Balance ONLY
+              await tx.supplierB.update({
+                  where: { id },
+                  data: { balance: { increment: safeDebtAmount } } 
+              });
+
+              // 2. Create the Ledger Entry
+              await tx.purchaseB.create({
+                  data: {
+                      id: uuidv4(),
+                      supplierId: id,
+                      reference: finalReference,
+                      type: 'SOLDE_INITIAL',
+                      status: 'EN_ATTENTE',
+                      totalHT: safeDebtAmount,
+                      totalTTC: safeDebtAmount,
+                      amountPaid: 0,
+                      note: note || "Reprise d'ancienneté / Dette Initiale",
+                      supplierNameSnapshot: supplier.name,
+                      supplierIceSnapshot: supplier.ice,
+                      items: {
+                          create: [{
+                              id: uuidv4(),
+                              productName: "Dette Ancienne (Hors Stock)",
+                              quantity: 1,
+                              unitPriceHT: safeDebtAmount,
+                              vatRateSnapshot: 0
+                          }]
+                      }
+                  }
+              });
+          });
+
+          res.json({ success: true });
+      } catch (e: any) {
+          res.status(400).json({ error: e.message || "Erreur lors de l'ajout de la dette." });
+      }
+  },
+
   createPurchase: async (req: Request, res: Response) => {
     try {
       const { supplierId, reference, type, items, note, initialPayment, paymentMethod, paymentRef } = req.body;
       const rawUserId = (req as any).user?.id;
       let amountPaid = Number(initialPayment) || 0;
 
-      // 🛡️ UI FAILSFE: If method is CREDIT, enforce 0 payment
       if (paymentMethod === 'CREDIT') amountPaid = 0;
 
       const isFacture = type === 'FACTURE_ACHAT';
       const isReception = type === 'BON_RECEPTION';
 
       const result = await prismaInternal.$transaction(async (tx) => {
-          // 🛡️ REFERENCE COLLISION SHIELD
           const finalReference = reference ? String(reference).trim() : `${isFacture ? 'ACH' : isReception ? 'BR' : 'BC'}-${Date.now().toString().slice(-8)}-${Math.floor(Math.random() * 10000)}`;
           
           const existingRef = await tx.purchaseB.findUnique({ where: { reference: finalReference } });
           if (existingRef) {
-              throw new Error(`La référence de document '${finalReference}' existe déjà. Veuillez utiliser un numéro unique.`);
+              throw new Error(`La référence de document '${finalReference}' existe déjà.`);
           }
 
           const supplier = await tx.supplierB.findUnique({ where: { id: supplierId } });
           if (!supplier) throw new Error("Fournisseur introuvable");
           const safeUserId = rawUserId ? (await tx.user.findUnique({ where: { id: rawUserId } }) ? rawUserId : null) : null;
 
-          // 🧮 SECURITY FIX: Aggregate strictly in CENTS to prevent drift
           let totalHTCents = 0; let totalTTCCents = 0; const formattedItems = [];
 
           for (const item of items) {
@@ -123,12 +177,12 @@ export const InternalPurchaseController = {
               });
           }
           
-          if (formattedItems.length === 0) throw new Error("Le document ne contient aucun article avec une quantité valide.");
+          if (formattedItems.length === 0) throw new Error("Le document ne contient aucun article.");
           
           const totalHT = totalHTCents / 100;
           const totalTTC = totalTTCCents / 100;
           
-          if (amountPaid > totalTTC) throw new Error(`Le montant payé (${amountPaid} DH) ne peut pas dépasser le total TTC du document (${totalTTC} DH).`);
+          if (amountPaid > totalTTC) throw new Error(`Le montant payé ne peut pas dépasser le TTC.`);
 
           const purchase = await tx.purchaseB.create({
               data: {
@@ -143,10 +197,10 @@ export const InternalPurchaseController = {
               include: { items: true }
           });
 
-          // 🧮 DEBT & PAYMENT MATH IN CENTS
           const amountPaidCents = Math.round(amountPaid * 100);
 
-          if (isFacture) {
+          // ✅ NATIVE FIX: BOTH Facture AND Bon de Reception now create Debt in the system.
+          if (isFacture || isReception) {
               const debtCents = totalTTCCents - amountPaidCents;
               await tx.supplierB.update({
                   where: { id: supplierId },
@@ -160,13 +214,12 @@ export const InternalPurchaseController = {
           }
 
           if (amountPaidCents > 0) {
-              // 🛡️ Link acompte to the first valid product or system dummy
               const linkProductId = formattedItems[0]?.productId || (await getSysFinanceProduct(tx)).id;
               
               await tx.stockMovement.create({
                   data: {
                       userId: safeUserId, supplierId, quantity: 0, type: MovementType.PAYMENT,
-                      amount: new Prisma.Decimal(amountPaidCents / 100).negated(), // Drains the till
+                      amount: new Prisma.Decimal(amountPaidCents / 100).negated(), 
                       totalHT: new Prisma.Decimal(0), totalTVA: new Prisma.Decimal(0),
                       paymentMethod: paymentMethod, paymentRef: paymentRef || `Acompte: ${purchase.reference}`,
                       snapshotProductName: `Paiement / Acompte (${type})`, productId: linkProductId
@@ -204,7 +257,6 @@ export const InternalPurchaseController = {
     } catch (e: any) { res.status(400).json({ error: e.message || "Erreur achat" }); }
   },
 
-  // 🚨 Enterprise Void / Reversal Engine
   voidPurchase: async (req: Request, res: Response) => {
       try {
           const { id } = req.params;
@@ -222,19 +274,18 @@ export const InternalPurchaseController = {
 
               const isFacture = purchase.type === 'FACTURE_ACHAT';
               const isReception = purchase.type === 'BON_RECEPTION';
+              const isSoldeInitial = purchase.type === 'SOLDE_INITIAL'; 
               
-              // 🧮 SECURITY FIX: Cent-Math Debt Reversal
               const amountPaidCents = Math.round(toNumber(purchase.amountPaid) * 100);
               const totalTTCCents = Math.round(toNumber(purchase.totalTTC) * 100);
 
-              // 1. Mark the document as permanently voided
               await tx.purchaseB.update({
                   where: { id },
                   data: { status: 'ANNULEE' }
               });
 
-              // 2. REVERSE ACCOUNTS PAYABLE
-              if (isFacture) {
+              // ✅ NATIVE FIX: Reversing a Bon de Reception now correctly reverses the Supplier's Debt.
+              if (isFacture || isReception) {
                   const debtCents = totalTTCCents - amountPaidCents;
                   await tx.supplierB.update({
                       where: { id: purchase.supplierId },
@@ -243,21 +294,24 @@ export const InternalPurchaseController = {
                           balance: { decrement: debtCents / 100 } 
                       }
                   });
+              } else if (isSoldeInitial) {
+                  await tx.supplierB.update({
+                      where: { id: purchase.supplierId },
+                      data: { balance: { decrement: totalTTCCents / 100 } }
+                  });
               } else if (amountPaidCents > 0) {
-                  // Reversing an advance payment on a Bon de Commande
                   await tx.supplierB.update({
                       where: { id: purchase.supplierId },
                       data: { balance: { increment: amountPaidCents / 100 } }
                   });
               }
 
-              // 3. 💰 REVERSE TREASURY (Refund the cash)
               if (amountPaidCents > 0) {
                   const sysFinanceProduct = await getSysFinanceProduct(tx);
                   await tx.stockMovement.create({
                       data: {
                           userId: rawUserId, supplierId: purchase.supplierId, quantity: 0, type: MovementType.ADJUSTMENT,
-                          amount: new Prisma.Decimal(amountPaidCents / 100), // POSITIVE: Cash returning to your drawer
+                          amount: new Prisma.Decimal(amountPaidCents / 100), 
                           totalHT: new Prisma.Decimal(0), totalTVA: new Prisma.Decimal(0),
                           paymentMethod: 'CASH', paymentRef: `Annulation: ${purchase.reference}`,
                           snapshotProductName: `Remboursement Suite Annulation (${purchase.type})`, productId: sysFinanceProduct.id
@@ -265,7 +319,6 @@ export const InternalPurchaseController = {
                   });
               }
 
-              // 4. 📦 REVERSE PHYSICAL STOCK
               if (isFacture || isReception) {
                   for (const item of purchase.items) {
                       if (item.productId) { 
@@ -298,12 +351,10 @@ export const InternalPurchaseController = {
           const { id } = req.params; 
           const { amount, method, reference, note } = req.body;
           
-          // 🧮 SECURITY FIX: Validate cleanly via Cents to prevent raw float injection
           const payAmtCents = Math.round(Number(amount) * 100);
           if (payAmtCents <= 0) return res.status(400).json({ error: "Montant invalide" });
 
           await prismaInternal.$transaction(async (tx) => {
-              // 🛡️ REFERENCE COLLISION SHIELD FOR PAYMENTS
               const finalReference = reference ? String(reference).trim() : `PAY-${Date.now().toString().slice(-8)}-${Math.floor(Math.random() * 10000)}`;
               const existingRef = await tx.purchaseB.findUnique({ where: { reference: finalReference } });
               if (existingRef) {
@@ -357,14 +408,15 @@ export const InternalPurchaseController = {
       try {
           const { id } = req.params;
           const supplier = await prismaInternal.supplierB.findUnique({ where: { id } });
-          if (!supplier) return res.status(404).json({ error: "Fournisseur introuvable dans la base de données." });
+          if (!supplier) return res.status(404).json({ error: "Fournisseur introuvable." });
 
           const purchases = await prismaInternal.purchaseB.findMany({ where: { supplierId: id }, orderBy: { issuedAt: 'asc' } });
           const history: any[] = [];
           
           purchases.forEach(p => {
               if (p.type !== 'PAIEMENT') {
-                  const creditAmount = p.type === 'FACTURE_ACHAT' ? toNumber(p.totalTTC) : 0;
+                  // ✅ NATIVE FIX: BON_RECEPTION is now calculated as a valid Credit (Debt) on the statement.
+                  const creditAmount = (p.type === 'FACTURE_ACHAT' || p.type === 'BON_RECEPTION' || p.type === 'SOLDE_INITIAL') ? toNumber(p.totalTTC) : 0;
                   history.push({ id: p.id + '-doc', date: p.issuedAt || new Date(), type: p.type || 'DOCUMENT', ref: p.reference || 'N/A', debit: 0, credit: creditAmount, note: p.note || '' });
                   if (toNumber(p.amountPaid) > 0) {
                       history.push({ id: p.id + '-pay', date: p.issuedAt || new Date(), type: 'PAIEMENT (Acompte)', ref: `Acompte: ${p.reference || 'N/A'}`, debit: toNumber(p.amountPaid), credit: 0, note: 'Acompte versé' });
@@ -384,7 +436,7 @@ export const InternalPurchaseController = {
           res.json({ supplier, statement, finalBalance: runningBalance });
       } catch (error) {
           console.error("🔥 FATAL ERROR IN getSupplierStatement:", error);
-          res.status(500).json({ error: "Erreur serveur lors de la génération du relevé. Vérifiez la console." }); 
+          res.status(500).json({ error: "Erreur serveur lors de la génération du relevé." }); 
       }
   }
 };

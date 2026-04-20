@@ -51,6 +51,7 @@ router.post('/suppliers/:id/payment', requireAdmin, InternalPurchaseController.r
 // 🛡️ SECURITY FIX: Supplier financial history should be Admin only
 router.get('/suppliers/:id/statement', requireAdmin, InternalPurchaseController.getSupplierStatement);
 router.delete('/suppliers/:id', requireAdmin, InternalPurchaseController.deleteSupplier);
+router.post('/suppliers/:id/legacy-debt', requireAdmin, InternalPurchaseController.addLegacyDebt);
 
 // 🛒 INTERNAL PURCHASES
 router.get('/purchases', InternalPurchaseController.getPurchaseHistory);

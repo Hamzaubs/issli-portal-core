@@ -1,6 +1,6 @@
 // web-ui/src/components/SupplierManager.tsx
 import React, { useState, useEffect } from 'react';
-import { Search, Plus, Truck, Trash2, Building2, Phone, CreditCard, XCircle, CheckCircle, History, FileText, Printer } from 'lucide-react';
+import { Search, Plus, Truck, Trash2, Building2, Phone, CreditCard, XCircle, CheckCircle, History, FileText, Printer, Clock } from 'lucide-react';
 import { SupplierService } from '../api/supplier'; 
 import client from '../api/client';
 import { SupplierStatementPrint } from './SupplierStatementPrint'; 
@@ -19,6 +19,10 @@ export const SupplierManager = ({ mode }: SupplierManagerProps) => {
   const [paymentModal, setPaymentModal] = useState<{ 
       isOpen: boolean; supplier: any; amount: string; method: string; ref: string; note: string 
   }>({ isOpen: false, supplier: null, amount: '', method: 'VIREMENT', ref: '', note: '' });
+
+  const [legacyDebtModal, setLegacyDebtModal] = useState<{ 
+      isOpen: boolean; supplier: any; amount: string; note: string; reference: string 
+  }>({ isOpen: false, supplier: null, amount: '', note: '', reference: '' });
 
   const [statementModal, setStatementModal] = useState<{
       isOpen: boolean; supplier: any; statement: any[]; loading: boolean;
@@ -86,11 +90,29 @@ export const SupplierManager = ({ mode }: SupplierManagerProps) => {
       } catch (error: any) { alert(error.response?.data?.error || "Erreur lors du paiement."); }
   };
 
+  const submitLegacyDebt = async () => {
+      const rawAmt = Number(legacyDebtModal.amount);
+      if (!rawAmt || rawAmt <= 0) return alert("Montant invalide");
+
+      try {
+          await client.post(`/internal/suppliers/${legacyDebtModal.supplier.id}/legacy-debt`, {
+              amount: rawAmt,
+              reference: legacyDebtModal.reference,
+              note: legacyDebtModal.note
+          });
+          alert("✅ Dette initiale ajoutée avec succès !");
+          setLegacyDebtModal({ isOpen: false, supplier: null, amount: '', note: '', reference: '' });
+          fetchSuppliers();
+      } catch (error: any) { 
+          alert(error.response?.data?.error || "Erreur lors de l'ajout de la dette."); 
+      }
+  };
+
   const openStatement = async (supplier: any) => {
       setStatementModal({ isOpen: true, supplier, statement: [], loading: true });
       try {
           const res = await client.get(`/internal/suppliers/${supplier.id}/statement`);
-          setStatementModal({ isOpen: true, supplier, statement: res.data.statement, loading: false });
+          setStatementModal({ isOpen: true, supplier, statement: res.data.statement || [], loading: false });
       } catch (error: any) {
           console.error("Frontend Statement Error:", error);
           alert(error.response?.data?.error || "Erreur de connexion au serveur.");
@@ -98,7 +120,7 @@ export const SupplierManager = ({ mode }: SupplierManagerProps) => {
       }
   };
 
-  const formatMAD = (amount: number) => new Intl.NumberFormat('fr-MA', { style: 'currency', currency: 'MAD' }).format(Number(amount));
+  const formatMAD = (amount: number) => new Intl.NumberFormat('fr-MA', { style: 'currency', currency: 'MAD' }).format(Number(amount) || 0);
 
   return (
     <div className="p-8 max-w-[1600px] mx-auto h-full flex flex-col relative">
@@ -183,6 +205,9 @@ export const SupplierManager = ({ mode }: SupplierManagerProps) => {
                     <td className="p-5 text-right flex items-center justify-end gap-3">
                       {!isLegal && (
                           <>
+                              <button onClick={() => setLegacyDebtModal({ isOpen: true, supplier, amount: '', note: '', reference: '' })} className="px-4 py-2 bg-amber-50 text-amber-600 hover:bg-amber-500 hover:text-white font-bold text-xs uppercase tracking-wider rounded-lg shadow-sm transition-all flex items-center gap-2 opacity-0 group-hover:opacity-100 border border-amber-200">
+                                  <Clock size={16}/> Dette Initiale
+                              </button>
                               <button onClick={() => openStatement(supplier)} className="px-4 py-2 bg-slate-100 text-slate-600 hover:bg-slate-900 hover:text-white font-bold text-xs uppercase tracking-wider rounded-lg shadow-sm transition-all flex items-center gap-2 opacity-0 group-hover:opacity-100">
                                   <History size={16}/> Historique
                               </button>
@@ -241,20 +266,26 @@ export const SupplierManager = ({ mode }: SupplierManagerProps) => {
                                   <tbody className="divide-y divide-slate-100 font-mono">
                                       {statementModal.statement.length === 0 ? (
                                           <tr><td colSpan={5} className="p-8 text-center text-slate-400 font-sans font-bold">Aucune transaction enregistrée.</td></tr>
-                                      ) : statementModal.statement.map((item, index) => (
-                                          <tr key={item.id || index} className="hover:bg-slate-50">
-                                              <td className="p-4 font-bold text-slate-600">{new Date(item.date).toLocaleDateString('fr-MA')}</td>
-                                              <td className="p-4">
-                                                  <div className="font-bold text-slate-800">{item.ref}</div>
-                                                  <div className="text-[10px] text-slate-500 font-sans uppercase tracking-widest mt-1">{item.type.replace('_', ' ')}</div>
-                                              </td>
-                                              <td className="p-4 text-right font-black text-emerald-500">{item.debit > 0 ? formatMAD(item.debit) : '-'}</td>
-                                              <td className="p-4 text-right font-black text-red-400">{item.credit > 0 ? formatMAD(item.credit) : '-'}</td>
-                                              <td className="p-4 text-right font-black bg-slate-50 text-slate-900 border-l border-slate-100">
-                                                  {formatMAD(item.balance)}
-                                              </td>
-                                          </tr>
-                                      ))}
+                                      ) : statementModal.statement.map((item, index) => {
+                                          const safeType = item.type || 'DOCUMENT';
+                                          return (
+                                              <tr key={item.id || index} className="hover:bg-slate-50">
+                                                  <td className="p-4 font-bold text-slate-600">{item.date ? new Date(item.date).toLocaleDateString('fr-MA') : '-'}</td>
+                                                  <td className="p-4">
+                                                      <div className="font-bold text-slate-800">{item.ref || '-'}</div>
+                                                      {/* NATIVE RENDER */}
+                                                      <div className="text-[10px] text-slate-500 font-sans uppercase tracking-widest mt-1">
+                                                          {safeType === 'FACTURE_ACHAT' && !isLegal ? 'BON DE RÉCEPTION' : safeType.replace('_', ' ')}
+                                                      </div>
+                                                  </td>
+                                                  <td className="p-4 text-right font-black text-emerald-500">{item.debit > 0 ? formatMAD(item.debit) : '-'}</td>
+                                                  <td className="p-4 text-right font-black text-red-400">{item.credit > 0 ? formatMAD(item.credit) : '-'}</td>
+                                                  <td className="p-4 text-right font-black bg-slate-50 text-slate-900 border-l border-slate-100">
+                                                      {formatMAD(item.balance)}
+                                                  </td>
+                                              </tr>
+                                          );
+                                      })}
                                   </tbody>
                               </table>
                           </div>
@@ -295,10 +326,29 @@ export const SupplierManager = ({ mode }: SupplierManagerProps) => {
           </div>
       )}
 
+      {legacyDebtModal.isOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4 animate-in fade-in">
+              <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl p-8 border border-slate-200">
+                  <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
+                      <h2 className="text-xl font-black text-slate-900 flex items-center gap-2"><Clock className="text-amber-500"/> Ajouter Dette Initiale</h2>
+                      <button onClick={() => setLegacyDebtModal({...legacyDebtModal, isOpen: false})}><XCircle className="text-slate-400 hover:text-slate-600 transition-colors"/></button>
+                  </div>
+                  <div className="mb-4">
+                      <p className="text-sm text-slate-500 font-bold mb-4">Insérez le montant du solde de départ pour <span className="text-slate-900 font-black">{legacyDebtModal.supplier?.name}</span> (avant la mise en place du système).</p>
+                      <input type="number" step="0.01" placeholder="Montant de la dette (MAD) *" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-black text-lg outline-none focus:border-amber-500 mb-3" value={legacyDebtModal.amount} onChange={e => setLegacyDebtModal({...legacyDebtModal, amount: e.target.value})} />
+                      <input type="text" placeholder="Référence (ex: FACTURE-2022)" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-amber-500 mb-3" value={legacyDebtModal.reference} onChange={e => setLegacyDebtModal({...legacyDebtModal, reference: e.target.value})} />
+                      <textarea placeholder="Note ou motif (Optionnel)" rows={2} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-amber-500" value={legacyDebtModal.note} onChange={e => setLegacyDebtModal({...legacyDebtModal, note: e.target.value})} />
+                  </div>
+                  <button onClick={submitLegacyDebt} className="w-full py-4 bg-amber-500 hover:bg-amber-600 text-white font-black text-sm uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-2"><CheckCircle size={18}/> Enregistrer Dette</button>
+              </div>
+          </div>
+      )}
+
       {printingStatement && statementModal.supplier && (
           <SupplierStatementPrint 
               supplier={statementModal.supplier} 
               statement={statementModal.statement} 
+              isLegal={isLegal}
               onClose={() => setPrintingStatement(false)} 
           />
       )}
