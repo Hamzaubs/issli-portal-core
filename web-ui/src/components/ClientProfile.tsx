@@ -349,7 +349,7 @@ export const ClientProfile: React.FC<Props> = ({ clientId, onClose }) => {
                                 </button>
                                 
                                 <button onClick={() => setShowLegacyDebtModal(true)} className="px-4 py-2 bg-white border border-slate-200 text-slate-600 hover:text-orange-600 hover:border-orange-200 rounded-xl text-xs font-bold shadow-sm transition-all flex items-center justify-center gap-2">
-                                    <History size={14}/> Importer Dette
+                                    <History size={14}/> Importer Créance
                                 </button>
                             </div>
                         </div>
