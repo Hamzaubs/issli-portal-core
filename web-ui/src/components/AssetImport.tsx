@@ -18,7 +18,6 @@ export const AssetImport: React.FC<Props> = ({ onCancel, onSuccess }) => {
     // 🔧 HELPER: French Number Parser (10,50 -> 10.50)
     const parseFrenchNum = (val: string) => {
         if (!val) return 0;
-        // Remove spaces (thousand separators) and swap comma for dot
         const clean = val.toString().replace(/\s/g, '').replace(',', '.');
         const num = parseFloat(clean);
         return isNaN(num) ? 0 : num;
@@ -35,37 +34,31 @@ export const AssetImport: React.FC<Props> = ({ onCancel, onSuccess }) => {
                 const text = evt.target?.result as string;
                 const lines = text.split('\n').filter(l => l.trim() !== '');
                 
-                // 🕵️ DETECT SEPARATOR (Semi-colon for Excel/French, Comma for US)
                 const firstLine = lines[0] || "";
                 const separator = firstLine.includes(';') ? ';' : ',';
 
-                // Skip headers (and magic "sep=;" if present)
                 const dataLines = lines.filter(l => !l.startsWith('sep=') && !l.toLowerCase().startsWith('reference'));
 
                 const parsed = dataLines.map((line, idx) => {
-                    // Remove quotes if Excel added them
                     const cols = line.split(separator).map(c => c.replace(/"/g, '').trim());
                     
-                    // EXPECTED ORDER: 
-                    // 0: Reference (Serial)
-                    // 1: Name
-                    // 2: Quantity
-                    // 3: Unit
-                    // 4: Purchase Cost (PAMP)
-                    // 5: Price HT (Vente)
-                    // 6: VAT (Optional)
-
                     const serial = cols[0];
                     const name = cols[1];
                     
-                    if (!name) return null; // Skip empty rows
+                    if (!name) return null;
 
                     const qty = parseFrenchNum(cols[2]);
-                    const unit = cols[3] || 'UNIT';
+                    
+                    // 🛡️ SMART UNIT PARSER (Enforces CONTRACTS.md: 'U' | 'KG' | 'L' | 'M')
+                    const rawUnit = (cols[3] || '').toUpperCase().trim();
+                    let safeUnit = 'U';
+                    if (rawUnit === 'KG' || rawUnit.startsWith('KIL')) safeUnit = 'KG';
+                    else if (rawUnit === 'L' || rawUnit.startsWith('LIT')) safeUnit = 'L';
+                    else if (rawUnit === 'M' || rawUnit.startsWith('MET')) safeUnit = 'M';
+
                     const cost = parseFrenchNum(cols[4]);
                     const price = parseFrenchNum(cols[5]);
                     
-                    // Smart VAT
                     const vatInput = parseFrenchNum(cols[6]);
                     let vatRate = 0.20;
                     if (vatInput === 10 || vatInput === 0.1) vatRate = 0.10;
@@ -75,7 +68,7 @@ export const AssetImport: React.FC<Props> = ({ onCancel, onSuccess }) => {
                         serialNumber: serial || `IMP-${Date.now()}-${idx}`,
                         name: name,
                         quantity: qty,
-                        measureUnit: unit,
+                        measureUnit: safeUnit,
                         purchaseCost: cost,
                         priceHT: price,
                         vatRate: vatRate
@@ -88,14 +81,13 @@ export const AssetImport: React.FC<Props> = ({ onCancel, onSuccess }) => {
         }
     };
 
-   // 📤 2. SEND TO API (Upgraded to ACID Batch Request)
+    // 📤 2. SEND TO API
     const handleImport = async () => {
         if (preview.length === 0) return;
         setUploading(true);
         setLogs([]);
 
         try {
-            // Send ALL products in ONE single request to prevent server flooding
             const response = await client.post('/legal/products/batch-import', { 
                 products: preview 
             });
@@ -112,12 +104,13 @@ export const AssetImport: React.FC<Props> = ({ onCancel, onSuccess }) => {
         }
     };
 
-    // 📥 3. DOWNLOAD TEMPLATE (Updated to match Export format)
+    // 📥 3. DOWNLOAD TEMPLATE
     const downloadTemplate = () => {
-        let content = "sep=;\n"; // Magic Header
+        let content = "sep=;\n";
         content += "Reference;Designation;Quantite;Unite;Cout Achat;Prix Vente;TVA %\n";
-        content += "MTR-YAM-40;Moteur Yamaha 40CV;5;UNIT;25000,00;32000,00;20\n";
-        content += "FIL-PECHE-PRO;Filet Pêche Pro;100,5;METRE;20,50;35,00;10\n";
+        content += "MTR-YAM-40;Moteur Yamaha 40CV;5;U;25000,00;32000,00;20\n";
+        content += "FIL-PECHE-PRO;Filet Pêche Pro;100,5;M;20,50;35,00;10\n";
+        content += "HUILE-MOT-5L;Huile Moteur 5L;20;L;150,00;200,00;20\n";
         
         const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
         const url = window.URL.createObjectURL(blob);
@@ -136,7 +129,7 @@ export const AssetImport: React.FC<Props> = ({ onCancel, onSuccess }) => {
                         <h3 className="font-black text-slate-800 text-lg flex items-center gap-2">
                             <Upload className="text-blue-600"/> Importation de Stock
                         </h3>
-                        <p className="text-xs text-slate-500 font-bold uppercase mt-1">Silo A (Legal) • Compatible Excel (CSV)</p>
+                        <p className="text-xs text-slate-500 font-bold uppercase mt-1">Compatible Excel (CSV)</p>
                     </div>
                     <button onClick={onCancel} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><X size={20}/></button>
                 </div>
@@ -227,7 +220,7 @@ export const AssetImport: React.FC<Props> = ({ onCancel, onSuccess }) => {
                         <button onClick={handleImport} disabled={uploading || preview.length === 0} 
                             className={`px-6 py-3 font-bold text-white rounded-xl shadow-lg flex items-center gap-2 transition-all active:scale-95 ${uploading ? 'bg-slate-400' : 'bg-blue-600 hover:bg-blue-700'}`}>
                             {uploading ? <RefreshCw className="animate-spin" size={20}/> : <ShieldCheck size={20}/>}
-                            {uploading ? 'Traitement en cours...' : 'Confirmer Import Silo A'}
+                            {uploading ? 'Traitement en cours...' : 'Confirmer Importation'}
                         </button>
                     )}
                 </div>

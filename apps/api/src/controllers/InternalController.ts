@@ -4,11 +4,21 @@ import { prismaInternal, MovementType, Prisma } from '@marine/db-internal';
 import { v4 as uuidv4 } from 'uuid';
 
 // ============================================================================
-// 🧮 CENT-BASED MATH ENGINE (Zero Floating-Point Drift)
+// 🧮 CENT-BASED MATH ENGINE & SANITIZERS
 // ============================================================================
 const safeDecimal = (val: any): Prisma.Decimal => {
     if (!val) return new Prisma.Decimal(0);
     return new Prisma.Decimal(Number(val).toFixed(2));
+};
+
+// 🛡️ Enforces Strict Schema 'U' | 'KG' | 'L' | 'M'
+const safeUnit = (u: any): string => {
+    if (!u) return 'U';
+    const clean = String(u).toUpperCase().trim();
+    if (clean === 'KG' || clean.startsWith('KIL')) return 'KG';
+    if (clean === 'L' || clean.startsWith('LIT')) return 'L';
+    if (clean === 'M' || clean.startsWith('MET')) return 'M';
+    return 'U';
 };
 
 const calculateCentMath = (ht: number, vatRate: number, qty: number = 1) => {
@@ -62,7 +72,7 @@ export const InternalController = {
                   vatRate: safeDecimal(safeVatRate),
                   priceTTC: math.totalTTC, 
                   quantity: Number(quantity) || 0, 
-                  measureUnit: measureUnit || 'UNIT', 
+                  measureUnit: safeUnit(measureUnit), // 🛡️ Appliqué
                   technicalSpecs 
               }
           });
@@ -87,7 +97,7 @@ export const InternalController = {
               data: { 
                 name, purchaseCost: safeDecimal(purchaseCost), 
                 priceHT: math.totalHT, vatRate: safeDecimal(safeVatRate), priceTTC: math.totalTTC, 
-                quantity: Number(quantity), measureUnit, technicalSpecs 
+                quantity: Number(quantity), measureUnit: safeUnit(measureUnit), technicalSpecs // 🛡️ Appliqué
               } 
           });
           res.json({ success: true });
@@ -119,18 +129,19 @@ export const InternalController = {
           const upsertOperations = products.map((item: any) => {
               if (!item.internalSku || !item.name) throw new Error(`Produit sans nom ou SKU détecté.`);
               const math = calculateCentMath(Number(item.priceHT) || 0, Number(item.vatRate) || 0, 1);
+              const finalizedUnit = safeUnit(item.measureUnit); // 🛡️ Nettoyage strict avant Prisma
 
               return prismaInternal.productB.upsert({
                   where: { internalSku: item.internalSku },
                   update: {
                       name: item.name, purchaseCost: safeDecimal(item.purchaseCost),
                       priceHT: math.totalHT, vatRate: safeDecimal(Number(item.vatRate) || 0), priceTTC: math.totalTTC,
-                      quantity: Number(item.quantity) || 0, measureUnit: item.measureUnit || 'UNIT',
+                      quantity: Number(item.quantity) || 0, measureUnit: finalizedUnit,
                   },
                   create: {
                       name: item.name, internalSku: item.internalSku, purchaseCost: safeDecimal(item.purchaseCost),
                       priceHT: math.totalHT, vatRate: safeDecimal(Number(item.vatRate) || 0), priceTTC: math.totalTTC,
-                      quantity: Number(item.quantity) || 0, measureUnit: item.measureUnit || 'UNIT',
+                      quantity: Number(item.quantity) || 0, measureUnit: finalizedUnit,
                   }
               });
           });
@@ -141,7 +152,7 @@ export const InternalController = {
   },
 
   // ====================================================
-  // 💰 2. TRANSACTION ENGINE 
+  // 💰 2. TRANSACTION ENGINE (Rest of file unchanged)
   // ====================================================
   
   getTransactions: async (req: Request, res: Response) => {
@@ -346,9 +357,6 @@ export const InternalController = {
     }
   },
 
-  // =========================================================================
-  // 🛑 UPGRADED VOID PROTOCOL
-  // =========================================================================
   voidTransaction: async (req: Request, res: Response) => {
     try {
       const { id } = req.params;

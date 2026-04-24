@@ -10,7 +10,7 @@ interface AssetFormProps {
 }
 
 const MEASURE_TYPES = [
-    { value: 'UNIT', label: 'Par Pièce (U)', icon: Box },
+    { value: 'U',    label: 'Par Pièce (U)', icon: Box }, // 🛡️ Alignement sur CONTRACTS.md
     { value: 'KG',   label: 'Par Poids (KG)', icon: Scale },
     { value: 'L',    label: 'Par Volume (L)', icon: Droplets },
     { value: 'M',    label: 'Par Longueur (M)', icon: Ruler }
@@ -19,7 +19,6 @@ const MEASURE_TYPES = [
 export const AssetForm: React.FC<AssetFormProps> = ({ onCancel, onSuccess, initialData }) => {
     const [loading, setLoading] = useState(false);
     
-    // Form State
     const [formData, setFormData] = useState({
         name: '',
         serialNumber: '',
@@ -27,7 +26,7 @@ export const AssetForm: React.FC<AssetFormProps> = ({ onCancel, onSuccess, initi
         priceHT: 0,      
         vatRate: 0.20,
         quantity: 0,
-        measureUnit: 'UNIT', 
+        measureUnit: 'U', 
         technicalSpecs: ''   
     });
 
@@ -39,8 +38,8 @@ export const AssetForm: React.FC<AssetFormProps> = ({ onCancel, onSuccess, initi
                 purchaseCost: Number(initialData.purchaseCost),
                 priceHT: Number(initialData.priceHT),
                 vatRate: Number(initialData.vatRate),
-                quantity: Number(initialData.quantity), // Ensure Number
-                measureUnit: initialData.measureUnit || 'UNIT',
+                quantity: Number(initialData.quantity),
+                measureUnit: initialData.measureUnit || 'U',
                 technicalSpecs: initialData.technicalSpecs || ''
             });
         }
@@ -81,20 +80,16 @@ export const AssetForm: React.FC<AssetFormProps> = ({ onCancel, onSuccess, initi
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in">
             <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
                 
-                {/* Header */}
                 <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                     <h2 className="text-xl font-black text-slate-800 flex items-center gap-2">
                         {initialData ? 'Modifier Produit' : 'Nouveau Produit'}
-                        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full uppercase tracking-wide">STOCK A</span>
                     </h2>
                     <button onClick={onCancel} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><X/></button>
                 </div>
 
-                {/* Body */}
                 <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-8">
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                         
-                        {/* LEFT: Identification & Specs */}
                         <div className="space-y-6">
                             <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
                                 <Anchor size={16}/> Caractéristiques
@@ -134,7 +129,6 @@ export const AssetForm: React.FC<AssetFormProps> = ({ onCancel, onSuccess, initi
                             <div>
                                 <label className="block text-sm font-bold text-slate-700 mb-1">Quantité Stock</label>
                                 <div className="relative">
-                                    {/* ✅ FIX: step="0.01" and parseFloat instead of parseInt */}
                                     <input type="number" step="0.01" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg font-bold" 
                                         value={formData.quantity} 
                                         onChange={e => setFormData({...formData, quantity: parseFloat(e.target.value) || 0})} />
@@ -144,7 +138,6 @@ export const AssetForm: React.FC<AssetFormProps> = ({ onCancel, onSuccess, initi
                                 </div>
                             </div>
 
-                            {/* Specs Input */}
                             <div>
                                 <label className="block text-sm font-bold text-slate-700 mb-1 flex items-center gap-2">
                                     <FileText size={14} className="text-slate-400"/> Spécifications Techniques
@@ -161,7 +154,6 @@ export const AssetForm: React.FC<AssetFormProps> = ({ onCancel, onSuccess, initi
                             </div>
                         </div>
 
-                        {/* RIGHT: Financials */}
                         <div className="space-y-6">
                             <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
                                 <Calculator size={16}/> Finance & Taxes
@@ -200,7 +192,6 @@ export const AssetForm: React.FC<AssetFormProps> = ({ onCancel, onSuccess, initi
                                 </div>
                             </div>
 
-                            {/* Live Calculations Card */}
                             <div className="bg-slate-900 text-white p-5 rounded-xl shadow-lg">
                                 <div className="flex justify-between items-center mb-2">
                                     <span className="text-xs text-slate-400 font-bold uppercase">Marge Unitaire</span>
