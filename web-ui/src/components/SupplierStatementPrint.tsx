@@ -51,6 +51,8 @@ export const SupplierStatementPrint = ({ supplier, statement, isLegal = false, o
                     <h3 className="text-xl font-black text-slate-900 mb-1">{supplier?.name || '-'}</h3>
                     <div className="text-[11px] text-slate-600 space-y-1">
                         <p>ICE: <span className="font-mono font-bold text-slate-800">{supplier?.ice || 'Non renseigné'}</span></p>
+                        {/* ✅ FIX: IF Native display on printed document */}
+                        <p>IF: <span className="font-mono font-bold text-slate-800">{supplier?.identifiantFiscal || 'Non renseigné'}</span></p>
                         <p>Tél: <span className="font-mono font-bold text-slate-800">{supplier?.phone || 'Non renseigné'}</span></p>
                     </div>
                 </div>

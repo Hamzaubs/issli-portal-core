@@ -1,3 +1,4 @@
+// apps/api/src/controllers/SupplierController.ts
 import { Request, Response } from 'express';
 import { prismaLegal } from '@marine/db-legal';
 import { v4 as uuidv4 } from 'uuid';
@@ -44,6 +45,7 @@ export const SupplierController = {
         where.OR = [
           { name: { contains: search, mode: 'insensitive' } },
           { ice: { contains: search } },
+          { identifiantFiscal: { contains: search } }, // ✅ Search support for IF added
           { phone: { contains: search } },
           { contactName: { contains: search, mode: 'insensitive' } }
         ];

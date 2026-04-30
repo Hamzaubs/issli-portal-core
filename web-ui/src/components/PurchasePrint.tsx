@@ -115,6 +115,8 @@ export const PurchasePrint = ({ purchase, isLegal = false, onClose }: { purchase
                     <h3 className="text-lg font-bold text-slate-900 mb-1">{purchase?.supplierNameSnapshot || purchase?.supplier?.name || '-'}</h3>
                     <div className="text-[11px] text-slate-600 space-y-1">
                         <p>ICE: <span className="font-mono font-bold text-slate-800">{purchase?.supplierIceSnapshot || purchase?.supplier?.ice || '-'}</span></p>
+                        {/* ✅ FIX: Native IF Display from Snapshot */}
+                        <p>IF: <span className="font-mono font-bold text-slate-800">{purchase?.supplierIfSnapshot || purchase?.supplier?.identifiantFiscal || '-'}</span></p>
                     </div>
                 </div>
             </div>

@@ -14,7 +14,9 @@ export const SupplierManager = ({ mode }: SupplierManagerProps) => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
-  const [formData, setFormData] = useState({ name: '', ice: '', phone: '', email: '', rc: '', if: '' });
+  
+  // ✅ FIX: Using safe identifiantFiscal naming
+  const [formData, setFormData] = useState({ name: '', ice: '', identifiantFiscal: '', phone: '', email: '', rc: '' });
 
   const [paymentModal, setPaymentModal] = useState<{ 
       isOpen: boolean; supplier: any; amount: string; method: string; ref: string; note: string 
@@ -49,7 +51,7 @@ export const SupplierManager = ({ mode }: SupplierManagerProps) => {
     try {
       await SupplierService.create(mode, formData);
       setShowForm(false);
-      setFormData({ name: '', ice: '', phone: '', email: '', rc: '', if: '' });
+      setFormData({ name: '', ice: '', identifiantFiscal: '', phone: '', email: '', rc: '' });
       fetchSuppliers();
     } catch (error: any) { alert(error.response?.data?.error || "Erreur lors de la création."); }
   };
@@ -143,7 +145,7 @@ export const SupplierManager = ({ mode }: SupplierManagerProps) => {
       <div className="mb-6 relative">
         <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
         <input 
-          type="text" placeholder="Rechercher par nom d'entreprise, ICE, ou téléphone..." 
+          type="text" placeholder="Rechercher par nom d'entreprise, ICE, IF, ou téléphone..." 
           className={`w-full pl-12 pr-4 py-4 bg-white border border-slate-200 rounded-xl font-bold text-slate-700 shadow-sm focus:outline-none focus:border-${themeColor}-500 transition-all`}
           value={search} onChange={(e) => setSearch(e.target.value)}
         />
@@ -151,10 +153,12 @@ export const SupplierManager = ({ mode }: SupplierManagerProps) => {
 
       {showForm && (
         <form onSubmit={handleSubmit} className="bg-slate-50 p-8 rounded-3xl border border-slate-200 shadow-inner mb-6">
-           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+           {/* ✅ FIX: Grid updated to display Identifiant Fiscal cleanly */}
+           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
               <input required type="text" placeholder="Raison Sociale *" className="p-4 bg-white rounded-xl outline-none border border-slate-200 focus:border-blue-500 font-bold" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
-              <input type="text" placeholder="ICE" className="p-4 bg-white rounded-xl outline-none border border-slate-200 focus:border-blue-500 font-bold" value={formData.ice} onChange={e => setFormData({...formData, ice: e.target.value})} />
               <input type="text" placeholder="Téléphone" className="p-4 bg-white rounded-xl outline-none border border-slate-200 focus:border-blue-500 font-bold" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} />
+              <input type="text" placeholder="ICE" className="p-4 bg-white rounded-xl outline-none border border-slate-200 focus:border-blue-500 font-bold" value={formData.ice} onChange={e => setFormData({...formData, ice: e.target.value})} />
+              <input type="text" placeholder="Identifiant Fiscal (IF)" className="p-4 bg-white rounded-xl outline-none border border-slate-200 focus:border-blue-500 font-bold" value={formData.identifiantFiscal} onChange={e => setFormData({...formData, identifiantFiscal: e.target.value})} />
            </div>
            <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
             <button type="button" onClick={() => setShowForm(false)} className="px-8 py-3 bg-white text-slate-600 font-bold rounded-xl border border-slate-200 hover:bg-slate-50">Annuler</button>
@@ -183,7 +187,8 @@ export const SupplierManager = ({ mode }: SupplierManagerProps) => {
                         <div className="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500 border border-slate-200"><Building2 size={24} /></div>
                         <div className="flex flex-col">
                             <span className="font-black text-slate-800 text-lg">{supplier.name}</span>
-                            <span className="text-xs font-bold text-slate-400 mt-1 uppercase">ICE: {supplier.ice || 'NON RENSEIGNÉ'}</span>
+                            {/* ✅ FIX: IF rendered natively on the table row */}
+                            <span className="text-xs font-bold text-slate-400 mt-1 uppercase">ICE: {supplier.ice || 'NON RENSEIGNÉ'} | IF: {supplier.identifiantFiscal || 'NON RENSEIGNÉ'}</span>
                         </div>
                       </div>
                     </td>
@@ -273,7 +278,6 @@ export const SupplierManager = ({ mode }: SupplierManagerProps) => {
                                                   <td className="p-4 font-bold text-slate-600">{item.date ? new Date(item.date).toLocaleDateString('fr-MA') : '-'}</td>
                                                   <td className="p-4">
                                                       <div className="font-bold text-slate-800">{item.ref || '-'}</div>
-                                                      {/* NATIVE RENDER */}
                                                       <div className="text-[10px] text-slate-500 font-sans uppercase tracking-widest mt-1">
                                                           {safeType === 'FACTURE_ACHAT' && !isLegal ? 'BON DE RÉCEPTION' : safeType.replace('_', ' ')}
                                                       </div>

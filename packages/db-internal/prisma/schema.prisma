@@ -145,10 +145,10 @@ model SupplierB {
   address     String?  @db.Text
   
   // Internal reference for Moroccan tax IDs if needed
-  ice         String?  @unique @db.VarChar(50) 
-  rc          String?  @db.VarChar(50)
-  if          String?  @db.VarChar(50) 
-  patente     String?  @db.VarChar(50)
+  ice               String?  @unique @db.VarChar(50) 
+  rc                String?  @db.VarChar(50)
+  identifiantFiscal String?  @map("identifiant_fiscal") @db.VarChar(50) // ✅ FIX: Evite le mot réservé JS 'if'
+  patente           String?  @db.VarChar(50)
 
   // ✅ New Financials (Accounts Payable)
   totalPurchased Decimal  @default(0) @map("total_purchased") @db.Decimal(10, 2)
@@ -186,6 +186,7 @@ model PurchaseB {
   // Snapshots for truth-tracking
   supplierNameSnapshot String? @map("supplier_name_snapshot")
   supplierIceSnapshot  String? @map("supplier_ice_snapshot")
+  supplierIfSnapshot   String? @map("supplier_if_snapshot") 
 
   items           PurchaseItemB[]
   

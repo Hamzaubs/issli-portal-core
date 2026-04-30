@@ -35,10 +35,10 @@ const getSysFinanceProduct = async (tx: any) => {
 export const InternalPurchaseController = {
   createSupplier: async (req: Request, res: Response) => {
     try {
-      const { name, phone, ice, address, contactName } = req.body;
+      const { name, phone, ice, identifiantFiscal, address, contactName } = req.body;
       if (!name) return res.status(400).json({ error: "Nom obligatoire" });
       const supplier = await prismaInternal.supplierB.create({
-        data: { id: uuidv4(), name, phone, ice, address, contactName, balance: 0, totalPurchased: 0 }
+        data: { id: uuidv4(), name, phone, ice, identifiantFiscal, address, contactName, balance: 0, totalPurchased: 0 }
       });
       res.json(supplier);
     } catch (e) { res.status(500).json({ error: "Erreur création fournisseur interne" }); }
@@ -117,6 +117,7 @@ export const InternalPurchaseController = {
                       note: note || "Reprise d'ancienneté / Dette Initiale",
                       supplierNameSnapshot: supplier.name,
                       supplierIceSnapshot: supplier.ice,
+                      supplierIfSnapshot: supplier.identifiantFiscal, // ✅ Snapshot the IF
                       items: {
                           create: [{
                               id: uuidv4(),
@@ -191,7 +192,9 @@ export const InternalPurchaseController = {
                   supplierId, type: type || 'FACTURE_ACHAT',
                   status: amountPaid >= totalTTC ? 'PAYEE' : (amountPaid > 0 ? 'PARTIEL' : 'EN_ATTENTE'),
                   totalHT, totalTTC, amountPaid, note,
-                  supplierNameSnapshot: supplier.name, supplierIceSnapshot: supplier.ice,
+                  supplierNameSnapshot: supplier.name, 
+                  supplierIceSnapshot: supplier.ice,
+                  supplierIfSnapshot: supplier.identifiantFiscal, // ✅ Snapshot the IF
                   items: { create: formattedItems.map(i => ({ id: i.id, productId: i.productId, productName: i.productName, quantity: i.quantity, unitPriceHT: i.unitPriceHT, vatRateSnapshot: i.vatRateSnapshot })) }
               },
               include: { items: true }
@@ -322,21 +325,24 @@ export const InternalPurchaseController = {
               if (isFacture || isReception) {
                   for (const item of purchase.items) {
                       if (item.productId) { 
-                          await tx.productB.update({
-                              where: { id: item.productId },
-                              data: { quantity: { decrement: toNumber(item.quantity) } }
-                          });
-                          await tx.stockMovement.create({
-                              data: {
-                                  productId: item.productId, userId: rawUserId, supplierId: purchase.supplierId, 
-                                  quantity: -toNumber(item.quantity), type: MovementType.ADJUSTMENT,
-                                  amount: new Prisma.Decimal(0), 
-                                  totalHT: new Prisma.Decimal(0), totalTVA: new Prisma.Decimal(0),
-                                  paymentRef: `Annulation: ${purchase.reference}`,
-                                  snapshotPurchaseCost: item.unitPriceHT, 
-                                  snapshotProductName: `[RETOUR / ANNULATION] ${item.productName}`
-                              }
-                          });
+                          const product = await tx.productB.findUnique({ where: { id: item.productId } });
+                          if (product) {
+                              await tx.productB.update({
+                                  where: { id: item.productId },
+                                  data: { quantity: { decrement: toNumber(item.quantity) } }
+                              });
+                              await tx.stockMovement.create({
+                                  data: {
+                                      productId: item.productId, userId: rawUserId, supplierId: purchase.supplierId, 
+                                      quantity: -toNumber(item.quantity), type: MovementType.ADJUSTMENT,
+                                      amount: new Prisma.Decimal(0), 
+                                      totalHT: new Prisma.Decimal(0), totalTVA: new Prisma.Decimal(0),
+                                      paymentRef: `Annulation: ${purchase.reference}`,
+                                      snapshotPurchaseCost: item.unitPriceHT, 
+                                      snapshotProductName: `[RETOUR / ANNULATION] ${item.productName}`
+                                  }
+                              });
+                          }
                       }
                   }
               }
@@ -378,7 +384,9 @@ export const InternalPurchaseController = {
                       id: uuidv4(), supplierId: id, reference: finalReference,
                       type: 'PAIEMENT', totalHT: 0, totalTTC: 0, amountPaid: safePayAmount,
                       note: note || `Règlement Fournisseur (${method})`,
-                      supplierNameSnapshot: supplier.name, supplierIceSnapshot: supplier.ice, status: 'PAYEE'
+                      supplierNameSnapshot: supplier.name, supplierIceSnapshot: supplier.ice, 
+                      supplierIfSnapshot: supplier.identifiantFiscal, // ✅ Snapshot the IF
+                      status: 'PAYEE'
                   }
               });
               
@@ -399,7 +407,7 @@ export const InternalPurchaseController = {
 
   getPurchaseHistory: async (req: Request, res: Response) => {
     try {
-      const purchases = await prismaInternal.purchaseB.findMany({ include: { supplier: { select: { name: true } }, items: true }, orderBy: { issuedAt: 'desc' } });
+      const purchases = await prismaInternal.purchaseB.findMany({ include: { supplier: { select: { name: true, identifiantFiscal: true } }, items: true }, orderBy: { issuedAt: 'desc' } });
       res.json(purchases);
     } catch (e) { res.status(500).json({ error: "Erreur historique achats" }); }
   },

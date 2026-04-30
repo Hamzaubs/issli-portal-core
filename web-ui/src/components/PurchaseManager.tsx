@@ -183,7 +183,8 @@ export const PurchaseManager = ({ mode }: PurchaseManagerProps) => {
               <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Fournisseur *</label>
               <select required className={`w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 outline-none focus:border-${themeColor}-500`} value={supplierId} onChange={e => setSupplierId(e.target.value)}>
                 <option value="">-- Choisir un fournisseur --</option>
-                {suppliers.map(s => <option key={s.id} value={s.id}>{s.name} ({s.ice || 'Sans ICE'})</option>)}
+                {/* ✅ FIX: Display IF in dropdown alongside ICE for legal verification */}
+                {suppliers.map(s => <option key={s.id} value={s.id}>{s.name} (ICE: {s.ice || 'N/A'} - IF: {s.identifiantFiscal || 'N/A'})</option>)}
               </select>
             </div>
             <div>
