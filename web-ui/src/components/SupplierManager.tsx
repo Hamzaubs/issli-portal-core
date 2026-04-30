@@ -1,6 +1,6 @@
 // web-ui/src/components/SupplierManager.tsx
 import React, { useState, useEffect } from 'react';
-import { Search, Plus, Truck, Trash2, Building2, Phone, CreditCard, XCircle, CheckCircle, History, FileText, Printer, Clock } from 'lucide-react';
+import { Search, Plus, Truck, Trash2, Building2, Phone, CreditCard, XCircle, CheckCircle, History, FileText, Printer, Clock, Edit } from 'lucide-react';
 import { SupplierService } from '../api/supplier'; 
 import client from '../api/client';
 import { SupplierStatementPrint } from './SupplierStatementPrint'; 
@@ -15,7 +15,10 @@ export const SupplierManager = ({ mode }: SupplierManagerProps) => {
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
   
-  // ✅ FIX: Using safe identifiantFiscal naming
+  // ✅ NEW: Editing State
+  const [isEditing, setIsEditing] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+
   const [formData, setFormData] = useState({ name: '', ice: '', identifiantFiscal: '', phone: '', email: '', rc: '' });
 
   const [paymentModal, setPaymentModal] = useState<{ 
@@ -46,14 +49,41 @@ export const SupplierManager = ({ mode }: SupplierManagerProps) => {
 
   useEffect(() => { fetchSuppliers(); }, [search, mode]);
 
+  const resetForm = () => {
+      setShowForm(false);
+      setIsEditing(false);
+      setEditId(null);
+      setFormData({ name: '', ice: '', identifiantFiscal: '', phone: '', email: '', rc: '' });
+  };
+
+  const handleEditClick = (supplier: any) => {
+      setIsEditing(true);
+      setEditId(supplier.id);
+      setFormData({
+          name: supplier.name || '',
+          ice: supplier.ice || '',
+          identifiantFiscal: supplier.identifiantFiscal || '',
+          phone: supplier.phone || '',
+          email: supplier.email || '',
+          rc: supplier.rc || ''
+      });
+      setShowForm(true);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await SupplierService.create(mode, formData);
-      setShowForm(false);
-      setFormData({ name: '', ice: '', identifiantFiscal: '', phone: '', email: '', rc: '' });
+      if (isEditing && editId) {
+          await SupplierService.update(mode, editId, formData);
+          alert("✅ Fournisseur mis à jour avec succès.");
+      } else {
+          await SupplierService.create(mode, formData);
+          alert("✅ Fournisseur créé avec succès.");
+      }
+      resetForm();
       fetchSuppliers();
-    } catch (error: any) { alert(error.response?.data?.error || "Erreur lors de la création."); }
+    } catch (error: any) { alert(error.response?.data?.error || "Erreur lors de la sauvegarde."); }
   };
 
   const handleDelete = async (id: string) => {
@@ -137,7 +167,7 @@ export const SupplierManager = ({ mode }: SupplierManagerProps) => {
             <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">{labelText}</p>
           </div>
         </div>
-        <button onClick={() => setShowForm(!showForm)} className={`px-5 py-3 bg-${isLegal ? 'indigo-600' : 'emerald-600'} text-white font-black uppercase text-xs tracking-wider rounded-xl hover:opacity-90 shadow-lg transition-all flex items-center gap-2 active:scale-95`}>
+        <button onClick={() => { resetForm(); setShowForm(true); }} className={`px-5 py-3 bg-${isLegal ? 'indigo-600' : 'emerald-600'} text-white font-black uppercase text-xs tracking-wider rounded-xl hover:opacity-90 shadow-lg transition-all flex items-center gap-2 active:scale-95`}>
           <Plus size={18} /> Nouveau Fournisseur
         </button>
       </div>
@@ -153,7 +183,9 @@ export const SupplierManager = ({ mode }: SupplierManagerProps) => {
 
       {showForm && (
         <form onSubmit={handleSubmit} className="bg-slate-50 p-8 rounded-3xl border border-slate-200 shadow-inner mb-6">
-           {/* ✅ FIX: Grid updated to display Identifiant Fiscal cleanly */}
+           <div className="mb-4">
+               <h3 className={`text-sm font-black uppercase tracking-widest text-${themeColor}-600`}>{isEditing ? 'Éditer le Fournisseur' : 'Créer un Fournisseur'}</h3>
+           </div>
            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
               <input required type="text" placeholder="Raison Sociale *" className="p-4 bg-white rounded-xl outline-none border border-slate-200 focus:border-blue-500 font-bold" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
               <input type="text" placeholder="Téléphone" className="p-4 bg-white rounded-xl outline-none border border-slate-200 focus:border-blue-500 font-bold" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} />
@@ -161,8 +193,8 @@ export const SupplierManager = ({ mode }: SupplierManagerProps) => {
               <input type="text" placeholder="Identifiant Fiscal (IF)" className="p-4 bg-white rounded-xl outline-none border border-slate-200 focus:border-blue-500 font-bold" value={formData.identifiantFiscal} onChange={e => setFormData({...formData, identifiantFiscal: e.target.value})} />
            </div>
            <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
-            <button type="button" onClick={() => setShowForm(false)} className="px-8 py-3 bg-white text-slate-600 font-bold rounded-xl border border-slate-200 hover:bg-slate-50">Annuler</button>
-            <button type="submit" className={`px-8 py-3 bg-${isLegal ? 'indigo-600' : 'emerald-600'} text-white font-bold uppercase text-xs rounded-xl shadow-lg`}><CheckCircle size={16} className="inline mr-2"/> Enregistrer</button>
+            <button type="button" onClick={resetForm} className="px-8 py-3 bg-white text-slate-600 font-bold rounded-xl border border-slate-200 hover:bg-slate-50">Annuler</button>
+            <button type="submit" className={`px-8 py-3 bg-${isLegal ? 'indigo-600' : 'emerald-600'} text-white font-bold uppercase text-xs rounded-xl shadow-lg`}><CheckCircle size={16} className="inline mr-2"/> {isEditing ? 'Sauvegarder' : 'Enregistrer'}</button>
           </div>
         </form>
       )}
@@ -187,7 +219,6 @@ export const SupplierManager = ({ mode }: SupplierManagerProps) => {
                         <div className="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500 border border-slate-200"><Building2 size={24} /></div>
                         <div className="flex flex-col">
                             <span className="font-black text-slate-800 text-lg">{supplier.name}</span>
-                            {/* ✅ FIX: IF rendered natively on the table row */}
                             <span className="text-xs font-bold text-slate-400 mt-1 uppercase">ICE: {supplier.ice || 'NON RENSEIGNÉ'} | IF: {supplier.identifiantFiscal || 'NON RENSEIGNÉ'}</span>
                         </div>
                       </div>
@@ -207,17 +238,22 @@ export const SupplierManager = ({ mode }: SupplierManagerProps) => {
                         <Phone size={14} className="text-slate-400"/> {supplier.phone || 'Aucun numéro'}
                       </div>
                     </td>
-                    <td className="p-5 text-right flex items-center justify-end gap-3">
+                    <td className="p-5 text-right flex items-center justify-end gap-2">
+                      {/* ✅ FIX: Native Edit Action injected into row */}
+                      <button onClick={() => handleEditClick(supplier)} className="p-2.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-transparent hover:border-blue-200" title="Éditer les informations">
+                          <Edit size={18} />
+                      </button>
+
                       {!isLegal && (
                           <>
-                              <button onClick={() => setLegacyDebtModal({ isOpen: true, supplier, amount: '', note: '', reference: '' })} className="px-4 py-2 bg-amber-50 text-amber-600 hover:bg-amber-500 hover:text-white font-bold text-xs uppercase tracking-wider rounded-lg shadow-sm transition-all flex items-center gap-2 opacity-0 group-hover:opacity-100 border border-amber-200">
+                              <button onClick={() => setLegacyDebtModal({ isOpen: true, supplier, amount: '', note: '', reference: '' })} className="px-3 py-2 bg-amber-50 text-amber-600 hover:bg-amber-500 hover:text-white font-bold text-xs uppercase tracking-wider rounded-lg shadow-sm transition-all flex items-center gap-2 opacity-0 group-hover:opacity-100 border border-amber-200">
                                   <Clock size={16}/> Dette Initiale
                               </button>
-                              <button onClick={() => openStatement(supplier)} className="px-4 py-2 bg-slate-100 text-slate-600 hover:bg-slate-900 hover:text-white font-bold text-xs uppercase tracking-wider rounded-lg shadow-sm transition-all flex items-center gap-2 opacity-0 group-hover:opacity-100">
+                              <button onClick={() => openStatement(supplier)} className="px-3 py-2 bg-slate-100 text-slate-600 hover:bg-slate-900 hover:text-white font-bold text-xs uppercase tracking-wider rounded-lg shadow-sm transition-all flex items-center gap-2 opacity-0 group-hover:opacity-100">
                                   <History size={16}/> Historique
                               </button>
                               {supplier.balance > 0 && (
-                                  <button onClick={() => setPaymentModal({ isOpen: true, supplier, amount: '', method: 'VIREMENT', ref: '', note: '' })} className="px-4 py-2 bg-red-50 text-red-600 hover:bg-red-500 hover:text-white font-bold text-xs uppercase tracking-wider rounded-lg shadow-sm transition-all flex items-center gap-2 opacity-0 group-hover:opacity-100 border border-red-200">
+                                  <button onClick={() => setPaymentModal({ isOpen: true, supplier, amount: '', method: 'VIREMENT', ref: '', note: '' })} className="px-3 py-2 bg-red-50 text-red-600 hover:bg-red-500 hover:text-white font-bold text-xs uppercase tracking-wider rounded-lg shadow-sm transition-all flex items-center gap-2 opacity-0 group-hover:opacity-100 border border-red-200">
                                       <CreditCard size={16}/> Régler Dette
                                   </button>
                               )}

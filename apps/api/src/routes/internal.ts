@@ -33,6 +33,7 @@ router.post('/transactions/:id/void', requireAdmin, InternalController.voidTrans
 router.get('/stats', requireAdmin, StatsController.getGlobalStats);
 router.get('/analytics', requireAdmin, DashboardController.getInternalAnalytics);
 router.get('/till', requirePosAccess, DashboardController.getDailyTill);
+
 // 👥 CLIENTS
 router.get('/clients', InternalClientController.searchClients);
 router.post('/clients', InternalClientController.createClient);
@@ -47,6 +48,7 @@ router.delete('/clients/:id', requireAdmin, InternalClientController.deleteClien
 // 🚛 INTERNAL SUPPLIERS 
 router.get('/suppliers', InternalPurchaseController.getSuppliers);
 router.post('/suppliers', requireAdmin, InternalPurchaseController.createSupplier);
+router.put('/suppliers/:id', requireAdmin, InternalPurchaseController.updateSupplier); // ✅ NEW: Safe Metadata Edit
 router.post('/suppliers/:id/payment', requireAdmin, InternalPurchaseController.registerPayment);
 // 🛡️ SECURITY FIX: Supplier financial history should be Admin only
 router.get('/suppliers/:id/statement', requireAdmin, InternalPurchaseController.getSupplierStatement);

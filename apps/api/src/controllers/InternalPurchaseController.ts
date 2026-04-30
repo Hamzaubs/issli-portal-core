@@ -44,6 +44,25 @@ export const InternalPurchaseController = {
     } catch (e) { res.status(500).json({ error: "Erreur création fournisseur interne" }); }
   },
 
+  // ✅ NEW: Update Supplier (Strictly limits payload to metadata to protect Ledger)
+  updateSupplier: async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const { name, phone, ice, identifiantFiscal, address, contactName } = req.body;
+      
+      if (!name) return res.status(400).json({ error: "Le nom est obligatoire." });
+
+      const supplier = await prismaInternal.supplierB.update({
+        where: { id },
+        data: { name, phone, ice, identifiantFiscal, address, contactName }
+      });
+      res.json(supplier);
+    } catch (error) { 
+      console.error("🔥 ERREUR updateSupplier:", error);
+      res.status(500).json({ error: "Erreur lors de la mise à jour du fournisseur." }); 
+    }
+  },
+
   getSuppliers: async (req: Request, res: Response) => {
     try {
       const suppliers = await prismaInternal.supplierB.findMany({ orderBy: { name: 'asc' } });
@@ -117,7 +136,7 @@ export const InternalPurchaseController = {
                       note: note || "Reprise d'ancienneté / Dette Initiale",
                       supplierNameSnapshot: supplier.name,
                       supplierIceSnapshot: supplier.ice,
-                      supplierIfSnapshot: supplier.identifiantFiscal, // ✅ Snapshot the IF
+                      supplierIfSnapshot: supplier.identifiantFiscal, 
                       items: {
                           create: [{
                               id: uuidv4(),
@@ -194,7 +213,7 @@ export const InternalPurchaseController = {
                   totalHT, totalTTC, amountPaid, note,
                   supplierNameSnapshot: supplier.name, 
                   supplierIceSnapshot: supplier.ice,
-                  supplierIfSnapshot: supplier.identifiantFiscal, // ✅ Snapshot the IF
+                  supplierIfSnapshot: supplier.identifiantFiscal,
                   items: { create: formattedItems.map(i => ({ id: i.id, productId: i.productId, productName: i.productName, quantity: i.quantity, unitPriceHT: i.unitPriceHT, vatRateSnapshot: i.vatRateSnapshot })) }
               },
               include: { items: true }
@@ -202,7 +221,6 @@ export const InternalPurchaseController = {
 
           const amountPaidCents = Math.round(amountPaid * 100);
 
-          // ✅ NATIVE FIX: BOTH Facture AND Bon de Reception now create Debt in the system.
           if (isFacture || isReception) {
               const debtCents = totalTTCCents - amountPaidCents;
               await tx.supplierB.update({
@@ -287,7 +305,6 @@ export const InternalPurchaseController = {
                   data: { status: 'ANNULEE' }
               });
 
-              // ✅ NATIVE FIX: Reversing a Bon de Reception now correctly reverses the Supplier's Debt.
               if (isFacture || isReception) {
                   const debtCents = totalTTCCents - amountPaidCents;
                   await tx.supplierB.update({
@@ -385,7 +402,7 @@ export const InternalPurchaseController = {
                       type: 'PAIEMENT', totalHT: 0, totalTTC: 0, amountPaid: safePayAmount,
                       note: note || `Règlement Fournisseur (${method})`,
                       supplierNameSnapshot: supplier.name, supplierIceSnapshot: supplier.ice, 
-                      supplierIfSnapshot: supplier.identifiantFiscal, // ✅ Snapshot the IF
+                      supplierIfSnapshot: supplier.identifiantFiscal,
                       status: 'PAYEE'
                   }
               });
@@ -423,7 +440,6 @@ export const InternalPurchaseController = {
           
           purchases.forEach(p => {
               if (p.type !== 'PAIEMENT') {
-                  // ✅ NATIVE FIX: BON_RECEPTION is now calculated as a valid Credit (Debt) on the statement.
                   const creditAmount = (p.type === 'FACTURE_ACHAT' || p.type === 'BON_RECEPTION' || p.type === 'SOLDE_INITIAL') ? toNumber(p.totalTTC) : 0;
                   history.push({ id: p.id + '-doc', date: p.issuedAt || new Date(), type: p.type || 'DOCUMENT', ref: p.reference || 'N/A', debit: 0, credit: creditAmount, note: p.note || '' });
                   if (toNumber(p.amountPaid) > 0) {
