@@ -7,7 +7,7 @@ const toNumber = (val: any) => val ? Number(val) : 0;
 
 // 🛡️ PRECISION FINANCIAL CALCULATOR
 const calculateFinancials = (docs: any[]) => {
-    let volumeCents = 0; 
+    let volumeCents = 0;
     let grossDebtCents = 0; 
     let availableCreditCents = 0; 
 
